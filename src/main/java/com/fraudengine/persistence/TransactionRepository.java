@@ -17,14 +17,17 @@ public interface TransactionRepository extends JpaRepository<TransactionEntity, 
 			order by t.occurredAt desc""")
 	List<TransactionEntity> findRecent(String customerId, Instant from, Instant to);
 
-	/** The customer's latest card-present transaction strictly before {@code before}. */
+	/**
+	 * The customer's latest card-present transaction at or before {@code upTo}. Equal times count, so two cards used
+	 * at the same moment in different countries are caught. Call it before saving the current transaction.
+	 */
 	@Query("""
 			select t from TransactionEntity t
 			where t.customerId = :customerId and t.channel = com.fraudengine.engine.Channel.CARD_PRESENT
-			  and t.occurredAt < :before
+			  and t.occurredAt <= :upTo
 			order by t.occurredAt desc
 			limit 1""")
-	Optional<TransactionEntity> findPreviousCardPresent(String customerId, Instant before);
+	Optional<TransactionEntity> findPreviousCardPresent(String customerId, Instant upTo);
 
 	/** Amount stats over {@code from <= occurredAt < to}. */
 	@Query(value = """

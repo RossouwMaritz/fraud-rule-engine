@@ -26,6 +26,7 @@ class CountryHopRuleTest {
 			"CARD_PRESENT | ZA | 120 |", // exactly the window
 			"CARD_PRESENT | ZA | 121 |", // just over the window
 			"CARD_PRESENT | ZA |  40 | Card-present in GB 40 minutes after card-present in ZA (window 2 hours)",
+			"CARD_PRESENT | ZA |   0 | Card-present in GB 0 minutes after card-present in ZA (window 2 hours)", // same moment
 			"CARD_PRESENT | GB |  10 |", // same country
 			"ONLINE       | ZA |  10 |", // online never fires
 			"CARD_PRESENT |    |   0 |" // no previous card-present transaction

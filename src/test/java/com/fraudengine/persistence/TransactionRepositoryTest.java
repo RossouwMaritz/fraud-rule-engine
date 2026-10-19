@@ -90,15 +90,18 @@ class TransactionRepositoryTest {
 	}
 
 	@Test
-	void findPreviousCardPresentSkipsOnlineAndLaterTransactions() {
+	void findPreviousCardPresentIncludesSameTimeAndSkipsOnlineAndLaterTransactions() {
 		saveAll(txn("cp_old", "cus_1", 100, Channel.CARD_PRESENT, "ZA", T0.minusSeconds(3000)),
 				txn("cp_prev", "cus_1", 100, Channel.CARD_PRESENT, "GB", T0.minusSeconds(2000)),
 				txn("online", "cus_1", 100, Channel.ONLINE, "US", T0.minusSeconds(1000)),
-				txn("cp_same_time", "cus_1", 100, Channel.CARD_PRESENT, "FR", T0));
+				txn("cp_same_time", "cus_1", 100, Channel.CARD_PRESENT, "FR", T0),
+				txn("cp_later", "cus_1", 100, Channel.CARD_PRESENT, "DE", T0.plusSeconds(1)));
 
 		assertThat(repository.findPreviousCardPresent("cus_1", T0)).map(TransactionEntity::getTransactionId)
+			.contains("cp_same_time");
+		assertThat(repository.findPreviousCardPresent("cus_1", T0.minusSeconds(1))).map(TransactionEntity::getTransactionId)
 			.contains("cp_prev");
-		assertThat(repository.findPreviousCardPresent("cus_1", T0.minusSeconds(3000))).isEmpty();
+		assertThat(repository.findPreviousCardPresent("cus_1", T0.minusSeconds(3001))).isEmpty();
 	}
 
 	private void saveAll(TransactionEntity... txns) {
