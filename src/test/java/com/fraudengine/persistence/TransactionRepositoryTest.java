@@ -4,6 +4,7 @@ import java.time.Instant;
 import java.util.List;
 
 import com.fraudengine.TestcontainersConfiguration;
+import com.fraudengine.engine.AmountStats;
 import com.fraudengine.engine.Channel;
 import com.fraudengine.engine.Decision;
 import org.junit.jupiter.api.Test;

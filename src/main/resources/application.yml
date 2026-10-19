@@ -9,6 +9,35 @@ spring:
     hibernate:
       ddl-auto: validate
 
+fraud:
+  bands:
+    review-from: 40
+    high-risk-from: 80
+  rules:
+    high-amount:
+      enabled: true
+      score: 40
+      threshold-minor: 5000000 # R50,000.00
+    amount-anomaly:
+      enabled: true
+      score: 50
+      min-history: 10
+      lookback: 30d
+      stddev-multiplier: 3
+    velocity:
+      enabled: true
+      score: 40
+      max-count: 5
+      window: 10m
+    country-hop:
+      enabled: true
+      score: 80
+      window: 2h
+    high-risk-category:
+      enabled: true
+      score: 20
+      categories: [GAMBLING, CRYPTO, MONEY_TRANSFER]
+
 management:
   endpoints:
     web:
