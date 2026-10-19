@@ -39,6 +39,12 @@ class FraudRulesPropertiesTest {
 			.run(context -> assertThat(context).getFailure().rootCause().hasMessageContaining("maxCount"));
 	}
 
+	@Test
+	void zeroWindowFailsStartup() {
+		runner.withPropertyValues("fraud.rules.velocity.window=0")
+			.run(context -> assertThat(context).getFailure().rootCause().hasMessageContaining("window"));
+	}
+
 	@EnableConfigurationProperties(FraudRulesProperties.class)
 	static class Config {
 

@@ -9,6 +9,7 @@ import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
+import org.hibernate.validator.constraints.time.DurationMin;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.validation.annotation.Validated;
 
@@ -35,13 +36,14 @@ public record FraudRulesProperties(@NotNull @Valid Bands bands, @NotNull @Valid 
 	}
 
 	public record AmountAnomaly(boolean enabled, @Min(0) int score, @Positive int minHistory,
-			@NotNull Duration lookback, @Positive double stddevMultiplier) {
+			@NotNull @DurationMin(seconds = 1) Duration lookback, @Positive double stddevMultiplier) {
 	}
 
-	public record Velocity(boolean enabled, @Min(0) int score, @Positive int maxCount, @NotNull Duration window) {
+	public record Velocity(boolean enabled, @Min(0) int score, @Positive int maxCount,
+			@NotNull @DurationMin(seconds = 1) Duration window) {
 	}
 
-	public record CountryHop(boolean enabled, @Min(0) int score, @NotNull Duration window) {
+	public record CountryHop(boolean enabled, @Min(0) int score, @NotNull @DurationMin(seconds = 1) Duration window) {
 	}
 
 	public record HighRiskCategory(boolean enabled, @Min(0) int score, @NotEmpty Set<String> categories) {

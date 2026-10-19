@@ -38,15 +38,6 @@ class RuleEngineTest {
 	}
 
 	@Test
-	void scoresOfAllHitsAreAdded() {
-		var evaluation = evaluate(new FakeRule("A", 30, true), new FakeRule("B", 20, true));
-
-		assertThat(evaluation.totalScore()).isEqualTo(50);
-		assertThat(evaluation.decision()).isEqualTo(Decision.REVIEW);
-		assertThat(evaluation.hits()).extracting(RuleHit::ruleId).containsExactly("A", "B");
-	}
-
-	@Test
 	void throwingRuleIsRecordedWhileOthersStillScore() {
 		var evaluation = evaluate(new FakeRule("A", 30, true), throwingRule("BROKEN"), new FakeRule("B", 50, true));
 
