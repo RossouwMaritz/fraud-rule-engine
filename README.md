@@ -1,0 +1,163 @@
+# Fraud Rule Engine
+
+A Spring Boot service that takes card transaction events, runs each one through a set of configurable fraud rules, and stores the decision with a readable reason for every rule that fired. It **flags** transactions for review and never blocks them.
+
+## Quick start
+
+You need Docker. `send.sh` also needs `curl` and `jq`.
+
+```bash
+cp .env.example .env
+docker compose up --build -d --wait   # returns once the app is healthy
+./samples/send.sh
+```
+
+`send.sh` posts the 21 events in `samples/transactions.json` in order. It prints each decision and the rules that fired, and exits with `1` if any decision is not the one expected.
+
+To score one transaction yourself:
+
+```bash
+curl -i http://localhost:8080/api/v1/transactions \
+  -H 'X-API-Key: local-dev-key' -H 'Content-Type: application/json' \
+  -d '{"transactionId": "txn_readme_01", "customerId": "cus_readme", "amountMinor": 6000000,
+       "currency": "ZAR", "merchantId": "mer_casino", "merchantCategory": "GAMBLING",
+       "channel": "ONLINE", "merchantCountry": "ZA", "occurredAt": "2026-10-19T10:00:00Z"}'
+```
+
+```http
+HTTP/1.1 201
+Location: /api/v1/transactions/txn_readme_01
+
+{
+  "transactionId": "txn_readme_01",
+  "decision": "REVIEW",
+  "totalScore": 60,
+  "hits": [
+    {"ruleId": "HIGH_AMOUNT", "score": 40, "reason": "ZAR 60,000.00 is over the ZAR 50,000.00 limit"},
+    {"ruleId": "HIGH_RISK_CATEGORY", "score": 20, "reason": "Merchant category GAMBLING is on the high-risk list"}
+  ],
+  "rulesErrored": []
+}
+```
+
+Then list everything that was flagged: `curl -H 'X-API-Key: local-dev-key' 'http://localhost:8080/api/v1/flags'`.
+
+## Architecture
+
+```mermaid
+flowchart LR
+    client[Client] -->|X-API-Key| filter[ApiKeyFilter]
+    filter --> controller[FraudApiController]
+    controller --> service[EvaluationService]
+    service -->|event + history| engine[RuleEngine]
+    engine --> rules[5 FraudRule beans]
+    service <-->|lock, history, save| db[(Postgres)]
+```
+
+`ApiKeyFilter` checks the key, and `FraudApiController` validates the body. `EvaluationService` then opens one database transaction and takes a Postgres advisory lock on the customer ID. If the transaction ID is already stored, it returns the stored result as a replay. Otherwise it loads the customer's history: recent transactions, their last card-present transaction, and amount stats over 30 days. It passes the event and history to `RuleEngine`, which runs every enabled rule, adds up the scores and picks a decision. The service saves the transaction and its hits and commits. The rules do no I/O, so all of them are plain unit tests.
+
+## Rules
+
+| Rule ID | Fires when (defaults) | Score |
+| --- | --- | --- |
+| `HIGH_AMOUNT` | The amount is over `5000000` minor units (R50,000). It's one limit for every currency, with no FX conversion | 40 |
+| `AMOUNT_ANOMALY` | The customer has at least 10 transactions in the last 30 days, and this amount is more than their mean + 3 × stddev. A repeat payment never fires (see below) | 50 |
+| `VELOCITY` | More than 5 of the customer's transactions in the 10 minutes up to and including this one | 40 |
+| `COUNTRY_HOP` | A card-present transaction in a different country from the customer's previous card-present one, less than 2 hours earlier. Online transactions never fire it | 80 |
+| `HIGH_RISK_CATEGORY` | The merchant category is `GAMBLING`, `CRYPTO` or `MONEY_TRANSFER` | 20 |
+
+**Decision.** The scores of all hits are added up. Under 40 is `CLEAN`, 40 to 79 is `REVIEW`, and 80 or more is `HIGH_RISK`. If a rule throws, it is logged and listed in `rulesErrored`, and the other rules still count.
+
+**Repeat payments.** Building the scenarios test showed that monthly rent was a false positive. With 10 or more small payments in a month, one repeated large amount always sits more than 3 stddev above the mean. So `AMOUNT_ANOMALY` skips a payment with the same merchant, amount and currency as one made 25 to 35 days earlier (35 covers a 31-day month). With that check turned off, the rent control in the scenarios test comes out `REVIEW`. The 25-day minimum stops a fraudster from clearing a flagged amount by just paying it again straight away.
+
+**Tuning.** Every threshold, score and band lives under `fraud:` in `src/main/resources/application.yml`. Any of them can be overridden with an environment variable, for example `FRAUD_RULES_VELOCITY_MAXCOUNT=8`. With Docker, add it to the app's `environment` in `docker-compose.yml`. Restart the app after a change. A bad value (a negative score, `high-risk-from` not above `review-from`) stops the app at startup.
+
+```yaml
+fraud:
+  bands:
+    review-from: 40
+    high-risk-from: 80
+  rules:
+    velocity:
+      enabled: true
+      score: 40
+      max-count: 5
+      window: 10m
+```
+
+`GET /api/v1/rules` shows the config the app is running with.
+
+## Adding a rule
+
+1. **Write the rule.** Add a `@Component` in `com.fraudengine.engine.rules` that implements `FraudRule`, with `id()`, `enabled()` and `evaluate()`. It must use only its arguments, with no I/O. `HighRiskCategoryRule` is the shortest example. `RuleEngine` picks it up automatically.
+2. **Add its config.** Add a record to `FraudRulesProperties` with `enabled`, `score` and its thresholds, with validation annotations. Add it to `Rules`, and add the defaults to `application.yml`.
+3. **Add its tests.** Add a `@ParameterizedTest` next to the others in `src/test/java/com/fraudengine/engine/rules`, covering just under, exactly at and just over the threshold, and empty history.
+
+## API
+
+Every `/api/**` call needs the `X-API-Key` header. A missing or wrong key gets `401`.
+
+| Method and path | Response |
+| --- | --- |
+| `POST /api/v1/transactions` | `201` with the evaluation. A replay of the same transaction gets `200` with the stored result. Reusing a transaction ID with different details gets `409` |
+| `GET /api/v1/transactions/{id}` | `200` with the transaction and its evaluation, or `404` |
+| `GET /api/v1/flags` | A page of `REVIEW` and `HIGH_RISK` transactions, newest first. Filters: `customerId`, `decision`, `ruleId`, `from` (inclusive), `to` (exclusive), `page`, `size` (max 100) |
+| `GET /api/v1/rules` | The bands and rule config the app is running with |
+
+Errors are RFC 9457 `ProblemDetail` bodies. A validation `400` lists each bad field. Amounts are integer minor units (`125000` is R1,250.00), and `occurredAt` may be at most 5 minutes in the future.
+
+Swagger UI is at <http://localhost:8080/swagger-ui.html>. Click **Authorize** and enter the key to try calls. Health is at `/actuator/health` and needs no key. Prometheus metrics are at `/actuator/prometheus` and need the key.
+
+## Testing
+
+Tests need JDK 25 (check with `java -version`), or set `JAVA_HOME` to point at it.
+
+```bash
+./mvnw test     # unit and Spring tests
+./mvnw verify   # the above, plus the FraudScenariosIT integration test
+```
+
+The rule and engine tests are plain unit tests. The Spring tests run against a real Postgres 17 in Testcontainers, so Docker must be running for both commands. To run only the tests that don't need Docker: `./mvnw test -Dtest='RuleEngineTest,FraudRulesPropertiesTest,*RuleTest'`.
+
+`FraudScenariosIT` is the evidence that the engine works. It posts events through the real API, with the real database, at fixed timestamps, and checks the exact decision and rule IDs for every event:
+
+| Scenario | Expected |
+| --- | --- |
+| Card testing: 7 small charges in 4 minutes | `VELOCITY` from the 6th charge |
+| Card-present in ZA, then card-present in GB 40 minutes later | `COUNTRY_HOP`, `HIGH_RISK` |
+| R60,000 at a gambling merchant | `HIGH_AMOUNT` + `HIGH_RISK_CATEGORY`, `REVIEW` |
+| A spike against a steady history of 15 payments of R300 to R600 | `AMOUNT_ANOMALY` |
+| Monthly rent across a 31-day month | `CLEAN` |
+| A normal grocery shop | `CLEAN` |
+| An online US purchase straight after card-present in ZA | `CLEAN` |
+| A real trip: card-present in ZA, then GB 11 hours later | `CLEAN` |
+
+`EvaluationServiceTest` also checks concurrency and replays: 10 events for one customer, posted from parallel threads, give exactly 10 rows with `VELOCITY` on the 6th and later. The same event posted twice gives one row and the same result both times.
+
+## Design decisions
+
+- **Synchronous REST, no broker.** The caller gets the decision in the response, and one database transaction both evaluates and stores it. So there is no gap where an event is accepted but not yet scored, and no queue to run. If a caller's network drops, it simply retries, and idempotency makes the retry safe.
+- **An advisory lock per customer.** `VELOCITY` and `COUNTRY_HOP` read the customer's earlier transactions. If two events for one customer arrived at the same moment, each could miss the other. So each evaluation first runs `pg_advisory_xact_lock(hashtext(customerId))`. Events for one customer run one at a time, different customers still run in parallel, and the lock is released when the transaction commits. No extra infrastructure is needed.
+- **Amounts in minor units.** Amounts are a `long` count of cents, never `double`, so there is no rounding error. The database column is `bigint` with a `> 0` check.
+- **Config in YAML.** Rules are code and thresholds are config. Keeping the config in `application.yml` means it is versioned and reviewed with the code, validated at startup, and readable at `GET /api/v1/rules`. Changing it needs a restart. That's a fair trade for a first version (see "What I'd add next").
+- **Idempotency.** The transaction ID is the primary key. A repeat of a stored ID with the same details returns the stored result with `200` and is not evaluated again, so a retry can't double-count itself in `VELOCITY`. A repeat with different details gets `409`.
+
+## What I'd add next
+
+- **A broker with a dead-letter queue** (Kafka or SQS), for upstream systems that publish events instead of calling an API.
+- **An analyst review workflow**, to assign, resolve and comment on flags. Resolved cases would also give labelled data.
+- **City-level travel checks.** Country codes miss fast travel inside one country, like Cape Town to Johannesburg in an hour.
+- **Rule versioning in the database**, so each stored decision records the exact config that produced it.
+- **Per-currency limits** for `HIGH_AMOUNT`, or conversion to one base currency.
+- **Hot reload** of thresholds without a restart.
+- **ML scoring** as one more rule, next to the readable ones.
+- **Real auth** (OAuth2 client credentials or mTLS) instead of one static API key.
+
+## Versions
+
+| | Version |
+| --- | --- |
+| Java | 25 |
+| Spring Boot | 4.1.1 |
+| PostgreSQL | 17 (`postgres:17` image, 17.11 when last run) |
+| springdoc-openapi | 3.1.1 |
