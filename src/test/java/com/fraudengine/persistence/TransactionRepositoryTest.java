@@ -12,8 +12,10 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
 import org.springframework.boot.jpa.test.autoconfigure.TestEntityManager;
 import org.springframework.context.annotation.Import;
+import org.springframework.dao.DataIntegrityViolationException;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.tuple;
 import static org.assertj.core.api.Assertions.within;
 
@@ -50,6 +52,14 @@ class TransactionRepositoryTest {
 		assertThat(stored.getReceivedAt()).isNotNull();
 		assertThat(stored.getHits()).extracting(RuleHitEntity::getRuleId, RuleHitEntity::getScore)
 			.containsExactlyInAnyOrder(tuple("HIGH_AMOUNT", 40), tuple("HIGH_RISK_CATEGORY", 20));
+	}
+
+	@Test
+	void savingADuplicateIdFailsInsteadOfOverwriting() {
+		saveAll(txn("txn_1", "cus_1", 100, Channel.ONLINE, "ZA", T0));
+
+		assertThatThrownBy(() -> repository.saveAndFlush(txn("txn_1", "cus_1", 999, Channel.ONLINE, "GB", T0)))
+			.isInstanceOf(DataIntegrityViolationException.class);
 	}
 
 	@Test

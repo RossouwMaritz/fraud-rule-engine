@@ -10,6 +10,10 @@ import org.springframework.data.jpa.repository.Query;
 
 public interface TransactionRepository extends JpaRepository<TransactionEntity, String> {
 
+	/** Blocks until no other transaction holds this customer's lock. Released at commit or rollback. */
+	@Query(value = "select 1 from pg_advisory_xact_lock(hashtext(:customerId))", nativeQuery = true)
+	int lockCustomer(String customerId);
+
 	/** The customer's transactions with {@code from <= occurredAt <= to}, newest first. */
 	@Query("""
 			select t from TransactionEntity t
