@@ -6,9 +6,11 @@ import java.util.Optional;
 
 import com.fraudengine.engine.AmountStats;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Query;
 
-public interface TransactionRepository extends JpaRepository<TransactionEntity, String> {
+public interface TransactionRepository
+		extends JpaRepository<TransactionEntity, String>, JpaSpecificationExecutor<TransactionEntity> {
 
 	/** Blocks until no other transaction holds this customer's lock. Released at commit or rollback. */
 	@Query(value = "select 1 from pg_advisory_xact_lock(hashtext(:customerId))", nativeQuery = true)

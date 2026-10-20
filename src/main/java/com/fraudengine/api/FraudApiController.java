@@ -1,0 +1,74 @@
+package com.fraudengine.api;
+
+import java.net.URI;
+import java.time.Instant;
+
+import com.fraudengine.engine.Decision;
+import com.fraudengine.engine.FraudRulesProperties;
+import com.fraudengine.service.EvaluationService;
+import com.fraudengine.service.StoredTransaction;
+import com.fraudengine.service.TransactionQueryService;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
+import org.springframework.data.web.PagedModel;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
+
+@RestController
+@RequestMapping("/api/v1")
+public class FraudApiController {
+
+	private final EvaluationService evaluations;
+
+	private final TransactionQueryService queries;
+
+	private final FraudRulesProperties rules;
+
+	public FraudApiController(EvaluationService evaluations, TransactionQueryService queries,
+			FraudRulesProperties rules) {
+		this.evaluations = evaluations;
+		this.queries = queries;
+		this.rules = rules;
+	}
+
+	/** 201 for a new evaluation, 200 for a replay of a stored one. */
+	@PostMapping("/transactions")
+	public ResponseEntity<EvaluationResponse> evaluate(@Valid @RequestBody TransactionRequest request) {
+		var result = evaluations.evaluate(request.toEvent());
+		var body = EvaluationResponse.of(result);
+		if (result.replay()) {
+			return ResponseEntity.ok(body);
+		}
+		return ResponseEntity.created(URI.create("/api/v1/transactions/" + result.transactionId())).body(body);
+	}
+
+	@GetMapping("/transactions/{id}")
+	public StoredTransaction transaction(@PathVariable String id) {
+		return queries.find(id)
+			.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Transaction " + id + " not found"));
+	}
+
+	@GetMapping("/flags")
+	public PagedModel<StoredTransaction> flags(@RequestParam(required = false) String customerId,
+			@RequestParam(required = false) Decision decision, @RequestParam(required = false) String ruleId,
+			@RequestParam(required = false) Instant from, @RequestParam(required = false) Instant to,
+			@RequestParam(defaultValue = "0") @Min(0) int page,
+			@RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {
+		return new PagedModel<>(queries.flags(customerId, decision, ruleId, from, to, page, size));
+	}
+
+	@GetMapping("/rules")
+	public FraudRulesProperties rules() {
+		return rules;
+	}
+
+}

@@ -3,6 +3,7 @@ package com.fraudengine.engine;
 import java.time.Duration;
 import java.util.Set;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.Min;
@@ -21,6 +22,7 @@ public record FraudRulesProperties(@NotNull @Valid Bands bands, @NotNull @Valid 
 	public record Bands(@Min(1) int reviewFrom, @Min(1) int highRiskFrom) {
 
 		@AssertTrue(message = "high-risk-from must be greater than review-from")
+		@JsonIgnore // a validation check, not config; keeps it out of GET /api/v1/rules
 		public boolean isOrdered() {
 			return highRiskFrom > reviewFrom;
 		}

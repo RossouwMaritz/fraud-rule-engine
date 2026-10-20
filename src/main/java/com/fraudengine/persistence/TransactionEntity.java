@@ -21,6 +21,7 @@ import jakarta.persistence.PostLoad;
 import jakarta.persistence.PostPersist;
 import jakarta.persistence.Table;
 import jakarta.persistence.Transient;
+import org.hibernate.annotations.BatchSize;
 import org.hibernate.annotations.Generated;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
@@ -74,6 +75,7 @@ public class TransactionEntity implements Persistable<String> {
 
 	@OneToMany(mappedBy = "transaction", cascade = CascadeType.ALL, orphanRemoval = true)
 	@OrderBy
+	@BatchSize(size = 100) // the flags page max, so a page loads all its hits in one query
 	private List<RuleHitEntity> hits = new ArrayList<>();
 
 	protected TransactionEntity() {
