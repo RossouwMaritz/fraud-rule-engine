@@ -10,6 +10,7 @@ spring:
       ddl-auto: validate
 
 fraud:
+  api-key: ${FRAUD_API_KEY} # no default, so the app won't start without it
   bands:
     review-from: 40
     high-risk-from: 80

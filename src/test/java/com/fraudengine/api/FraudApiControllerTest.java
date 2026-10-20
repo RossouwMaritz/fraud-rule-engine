@@ -6,18 +6,19 @@ import java.time.Instant;
 import com.fraudengine.TestcontainersConfiguration;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
-import org.springframework.security.test.context.support.WithMockUser;
+import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
+import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 
 import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.hamcrest.Matchers.endsWith;
-import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
@@ -25,17 +26,19 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-// Security is a placeholder until step 7 adds the API key, so a mock user stands in for now.
 @SpringBootTest
 @AutoConfigureMockMvc
 @Import(TestcontainersConfiguration.class)
-@WithMockUser
+@ActiveProfiles("test")
 class FraudApiControllerTest {
 
 	private static final Instant T0 = Instant.parse("2026-10-19T10:00:00Z");
 
 	@Autowired
 	MockMvc mvc;
+
+	@Value("${fraud.api-key}")
+	String apiKey;
 
 	@Test
 	void postEvaluatesThenReplayReturnsTheSameBodyWith200() throws Exception {
@@ -71,7 +74,7 @@ class FraudApiControllerTest {
 		postTransaction(json("txn 1", "cus_api_url", 10_000, "GROCERIES", "ONLINE", "ZA", T0))
 			.andExpect(status().isBadRequest())
 			.andExpect(jsonPath("$.errors[*].field").value(contains("transactionId")));
-		mvc.perform(get("/api/v1/transactions/txn 1")).andExpect(status().isNotFound());
+		perform(get("/api/v1/transactions/txn 1")).andExpect(status().isNotFound());
 	}
 
 	@Test
@@ -103,7 +106,7 @@ class FraudApiControllerTest {
 		postTransaction(json("txn_api_get", "cus_api_get", 10_000, "GROCERIES", "ONLINE", "ZA", T0))
 			.andExpect(status().isCreated());
 
-		mvc.perform(get("/api/v1/transactions/txn_api_get"))
+		perform(get("/api/v1/transactions/txn_api_get"))
 			.andExpect(status().isOk())
 			.andExpect(jsonPath("$.transaction.customerId").value("cus_api_get"))
 			.andExpect(jsonPath("$.transaction.amountMinor").value(10_000))
@@ -114,7 +117,7 @@ class FraudApiControllerTest {
 
 	@Test
 	void getUnknownIs404Problem() throws Exception {
-		mvc.perform(get("/api/v1/transactions/nope"))
+		perform(get("/api/v1/transactions/nope"))
 			.andExpect(status().isNotFound())
 			.andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON))
 			.andExpect(jsonPath("$.status").value(404));
@@ -127,19 +130,19 @@ class FraudApiControllerTest {
 		postTransaction(json("txn_f_review", customer, 6_000_000, "GAMBLING", "ONLINE", "ZA", T0.plusSeconds(60)));
 		postTransaction(json("txn_f_hop", customer, 10_000, "GROCERIES", "CARD_PRESENT", "GB", T0.plusSeconds(600)));
 
-		mvc.perform(get("/api/v1/flags").param("customerId", customer))
+		perform(get("/api/v1/flags").param("customerId", customer))
 			.andExpect(status().isOk())
 			.andExpect(jsonPath("$.content[*].transaction.transactionId").value(
 					contains("txn_f_hop", "txn_f_review")))
 			.andExpect(jsonPath("$.content[0].evaluation.decision").value("HIGH_RISK"))
 			.andExpect(jsonPath("$.page.totalElements").value(2));
-		mvc.perform(get("/api/v1/flags").param("customerId", customer).param("ruleId", "COUNTRY_HOP"))
+		perform(get("/api/v1/flags").param("customerId", customer).param("ruleId", "COUNTRY_HOP"))
 			.andExpect(jsonPath("$.content[*].transaction.transactionId").value(
 					contains("txn_f_hop")));
-		mvc.perform(get("/api/v1/flags").param("customerId", customer).param("decision", "REVIEW"))
+		perform(get("/api/v1/flags").param("customerId", customer).param("decision", "REVIEW"))
 			.andExpect(jsonPath("$.content[*].transaction.transactionId").value(
 					contains("txn_f_review")));
-		mvc.perform(get("/api/v1/flags").param("customerId", customer)
+		perform(get("/api/v1/flags").param("customerId", customer)
 			.param("from", T0.plusSeconds(60).toString())
 			.param("to", T0.plusSeconds(600).toString()))
 			.andExpect(jsonPath("$.content[*].transaction.transactionId").value(
@@ -148,14 +151,14 @@ class FraudApiControllerTest {
 
 	@Test
 	void flagsPageSizeOver100Is400() throws Exception {
-		mvc.perform(get("/api/v1/flags").param("size", "101"))
+		perform(get("/api/v1/flags").param("size", "101"))
 			.andExpect(status().isBadRequest())
 			.andExpect(jsonPath("$.errors[*].field").value(containsInAnyOrder("size")));
 	}
 
 	@Test
 	void rulesReturnsTheActiveConfig() throws Exception {
-		mvc.perform(get("/api/v1/rules"))
+		perform(get("/api/v1/rules"))
 			.andExpect(status().isOk())
 			.andExpect(jsonPath("$.bands.reviewFrom").value(40))
 			.andExpect(jsonPath("$.bands.highRiskFrom").value(80))
@@ -168,14 +171,18 @@ class FraudApiControllerTest {
 
 	@Test
 	void openApiDocsAreServed() throws Exception {
-		mvc.perform(get("/v3/api-docs"))
+		perform(get("/v3/api-docs"))
 			.andExpect(status().isOk())
 			.andExpect(jsonPath("$.paths['/api/v1/flags']").exists());
-		mvc.perform(get("/swagger-ui.html")).andExpect(header().string("Location", endsWith("/swagger-ui/index.html")));
+		perform(get("/swagger-ui.html")).andExpect(header().string("Location", endsWith("/swagger-ui/index.html")));
 	}
 
 	private ResultActions postTransaction(String body) throws Exception {
-		return mvc.perform(post("/api/v1/transactions").with(csrf()).contentType(MediaType.APPLICATION_JSON).content(body));
+		return perform(post("/api/v1/transactions").contentType(MediaType.APPLICATION_JSON).content(body));
+	}
+
+	private ResultActions perform(MockHttpServletRequestBuilder request) throws Exception {
+		return mvc.perform(request.header("X-API-Key", apiKey));
 	}
 
 	private static String json(String id, String customerId, long amountMinor, String category, String channel,
