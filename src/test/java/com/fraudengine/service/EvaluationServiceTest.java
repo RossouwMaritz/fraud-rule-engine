@@ -19,6 +19,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @SpringBootTest
 @Import(TestcontainersConfiguration.class)
@@ -46,6 +47,24 @@ class EvaluationServiceTest {
 		assertThat(second.replay()).isTrue();
 		assertThat(second.evaluation()).isEqualTo(first.evaluation());
 		assertThat(repository.findRecent("cus_replay", T0, T0)).hasSize(1);
+	}
+
+	@Test
+	void replayMatchesDespiteSubMicrosecondDigits() {
+		var txn = event("txn_nanos", "cus_nanos", 10_000, "GROCERIES", T0.plusNanos(123_456_789));
+
+		service.evaluate(txn);
+
+		assertThat(service.evaluate(txn).replay()).isTrue();
+	}
+
+	@Test
+	void sameIdWithDifferentDetailsIsAConflict() {
+		service.evaluate(event("txn_conflict", "cus_a", 10_000, "GROCERIES", T0));
+
+		assertThatThrownBy(() -> service.evaluate(event("txn_conflict", "cus_b", 6_000_000, "GAMBLING", T0)))
+			.isInstanceOf(TransactionConflictException.class);
+		assertThat(repository.findRecent("cus_b", T0, T0)).isEmpty();
 	}
 
 	@Test

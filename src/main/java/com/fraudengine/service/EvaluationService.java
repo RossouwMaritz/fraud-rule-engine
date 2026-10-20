@@ -1,6 +1,7 @@
 package com.fraudengine.service;
 
 import java.time.Duration;
+import java.time.temporal.ChronoUnit;
 
 import com.fraudengine.engine.CustomerHistory;
 import com.fraudengine.engine.FraudRulesProperties;
@@ -50,6 +51,13 @@ public class EvaluationService {
 
 			var stored = repository.findById(txn.transactionId());
 			if (stored.isPresent()) {
+				// Postgres keeps microseconds and the driver rounds half up, so round the same way before comparing.
+				var sameEvent = new TransactionEvent(txn.transactionId(), txn.customerId(), txn.amountMinor(),
+						txn.currency(), txn.merchantId(), txn.merchantCategory(), txn.channel(), txn.merchantCountry(),
+						txn.occurredAt().plusNanos(500).truncatedTo(ChronoUnit.MICROS));
+				if (!stored.get().toEvent().equals(sameEvent)) {
+					throw new TransactionConflictException(txn.transactionId());
+				}
 				var result = new EvaluationResult(txn.transactionId(), stored.get().toEvaluation(), true);
 				logResult(txn, result);
 				return result;
@@ -65,7 +73,8 @@ public class EvaluationService {
 					repository.findPreviousCardPresent(txn.customerId(), at).map(TransactionEntity::toEvent),
 					repository.amountStats(txn.customerId(), at.minus(amountLookback), at));
 			var evaluation = engine.evaluate(txn, history);
-			repository.save(TransactionEntity.of(txn, evaluation));
+			// Flush now so a failed insert stops us before the metrics and the log claim success.
+			repository.saveAndFlush(TransactionEntity.of(txn, evaluation));
 
 			meters.counter("fraud.evaluations", "decision", evaluation.decision().name()).increment();
 			evaluation.hits().forEach(hit -> meters.counter("fraud.rule.hits", "rule", hit.ruleId()).increment());
