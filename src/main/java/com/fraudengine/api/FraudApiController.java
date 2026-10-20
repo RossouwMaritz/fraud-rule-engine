@@ -8,6 +8,7 @@ import com.fraudengine.engine.FraudRulesProperties;
 import com.fraudengine.service.EvaluationService;
 import com.fraudengine.service.StoredTransaction;
 import com.fraudengine.service.TransactionQueryService;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -25,6 +26,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 @RestController
 @RequestMapping("/api/v1")
+@SecurityRequirement(name = SecurityConfig.OPENAPI_SCHEME)
 public class FraudApiController {
 
 	private final EvaluationService evaluations;

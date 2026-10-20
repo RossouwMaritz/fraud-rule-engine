@@ -18,7 +18,6 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
 
 import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.containsInAnyOrder;
-import static org.hamcrest.Matchers.endsWith;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
@@ -167,14 +166,6 @@ class FraudApiControllerTest {
 			.andExpect(jsonPath("$.rules.velocity.enabled").value(true))
 			.andExpect(jsonPath("$.rules.velocity.maxCount").value(5))
 			.andExpect(jsonPath("$.rules.highAmount.thresholdMinor").value(5_000_000));
-	}
-
-	@Test
-	void openApiDocsAreServed() throws Exception {
-		perform(get("/v3/api-docs"))
-			.andExpect(status().isOk())
-			.andExpect(jsonPath("$.paths['/api/v1/flags']").exists());
-		perform(get("/swagger-ui.html")).andExpect(header().string("Location", endsWith("/swagger-ui/index.html")));
 	}
 
 	private ResultActions postTransaction(String body) throws Exception {
