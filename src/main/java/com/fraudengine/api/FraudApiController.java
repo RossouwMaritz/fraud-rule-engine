@@ -67,8 +67,8 @@ public class FraudApiController {
 	}
 
 	@GetMapping("/rules")
-	public FraudRulesProperties rules() {
-		return rules;
+	public RulesResponse rules() {
+		return new RulesResponse(rules.bands(), rules.rules());
 	}
 
 }

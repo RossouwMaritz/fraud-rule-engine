@@ -12,7 +12,8 @@ import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.Size;
 
 /** {@code occurredAt} may be up to 5 minutes ahead, through the validator's temporal tolerance. */
-public record TransactionRequest(@NotBlank @Size(max = 64) String transactionId,
+// The transaction ID goes into URLs (Location, GET by ID), so only URL-safe characters are allowed.
+public record TransactionRequest(@NotBlank @Size(max = 64) @Pattern(regexp = "[A-Za-z0-9_.:-]+") String transactionId,
 		@NotBlank @Size(max = 64) String customerId, @Positive long amountMinor,
 		@NotNull @Pattern(regexp = "[A-Z]{3}") String currency, @NotBlank @Size(max = 64) String merchantId,
 		@NotBlank @Size(max = 64) String merchantCategory, @NotNull Channel channel,

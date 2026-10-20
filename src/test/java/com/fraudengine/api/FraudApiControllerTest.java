@@ -57,13 +57,21 @@ class FraudApiControllerTest {
 
 	@Test
 	void invalidRequestIs400WithTheFieldNames() throws Exception {
-		var body = json(" ", "cus_api_bad", 0, "GROCERIES", "CARD_PRESENT", "za", Instant.now().plus(Duration.ofMinutes(6)))
+		var body = json("t".repeat(65), "cus_api_bad", 0, "GROCERIES", "CARD_PRESENT", "za", Instant.now().plus(Duration.ofMinutes(6)))
 			.replace("\"ZAR\"", "\"zar\"");
 
 		postTransaction(body).andExpect(status().isBadRequest())
 			.andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON))
 			.andExpect(jsonPath("$.errors[*].field").value(
 					containsInAnyOrder("transactionId", "amountMinor", "currency", "merchantCountry", "occurredAt")));
+	}
+
+	@Test
+	void transactionIdThatIsNotUrlSafeIs400AndNotStored() throws Exception {
+		postTransaction(json("txn 1", "cus_api_url", 10_000, "GROCERIES", "ONLINE", "ZA", T0))
+			.andExpect(status().isBadRequest())
+			.andExpect(jsonPath("$.errors[*].field").value(contains("transactionId")));
+		mvc.perform(get("/api/v1/transactions/txn 1")).andExpect(status().isNotFound());
 	}
 
 	@Test
