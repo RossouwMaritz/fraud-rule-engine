@@ -39,7 +39,15 @@ public record FraudRulesProperties(@NotNull @Valid Bands bands, @NotNull @Valid 
 
 	public record AmountAnomaly(boolean enabled, @Min(0) int score, @Positive int minHistory,
 			@NotNull @DurationMin(seconds = 1) Duration lookback, @Positive double stddevMultiplier,
-			@NotNull @DurationMin(seconds = 1) Duration repeatLookback) {
+			@NotNull @DurationMin(seconds = 1) Duration repeatMinAge,
+			@NotNull @DurationMin(seconds = 1) Duration repeatMaxAge) {
+
+		@AssertTrue(message = "repeat-max-age must be greater than repeat-min-age")
+		@JsonIgnore // a validation check, not config; keeps it out of GET /api/v1/rules
+		public boolean isRepeatWindowOrdered() {
+			return repeatMinAge == null || repeatMaxAge == null || repeatMaxAge.compareTo(repeatMinAge) > 0;
+		}
+
 	}
 
 	public record Velocity(boolean enabled, @Min(0) int score, @Positive int maxCount,

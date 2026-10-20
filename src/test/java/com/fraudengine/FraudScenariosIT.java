@@ -77,7 +77,11 @@ class FraudScenariosIT {
 		var customer = new Customer("cus_sc_spike");
 		var start = Instant.parse("2026-09-01T17:00:00Z");
 		customer.seedSteadyHistory(start);
-		customer.pay(750_000, "mer_electronics", "ELECTRONICS", "ONLINE", "ZA", start.plus(Duration.ofDays(15)))
+		var spike = start.plus(Duration.ofDays(15));
+		customer.pay(750_000, "mer_electronics", "ELECTRONICS", "ONLINE", "ZA", spike)
+			.expect(REVIEW, "AMOUNT_ANOMALY");
+		// Paying the flagged amount again an hour later is not a repeat payment, so it stays flagged.
+		customer.pay(750_000, "mer_electronics", "ELECTRONICS", "ONLINE", "ZA", spike.plus(Duration.ofHours(1)))
 			.expect(REVIEW, "AMOUNT_ANOMALY");
 	}
 
@@ -94,7 +98,7 @@ class FraudScenariosIT {
 					lastRent.plus(Duration.ofDays(2 + 2L * i)).plus(Duration.ofHours(11)))
 				.expect(CLEAN);
 		}
-		// 31 days later: last month's rent is outside the 30-day stats window, but inside the repeat lookback.
+		// 31 days later: last month's rent is outside the 30-day stats window, but one billing cycle back.
 		customer.pay(950_000, "mer_landlord", "RENT", "ONLINE", "ZA", Instant.parse("2026-09-25T06:00:00Z"))
 			.expect(CLEAN);
 	}

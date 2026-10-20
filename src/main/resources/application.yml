@@ -25,7 +25,10 @@ fraud:
       min-history: 10
       lookback: 30d
       stddev-multiplier: 3
-      repeat-lookback: 35d # a monthly payment (rent, debit order) is never an anomaly; 35d spans a 31-day month
+      # The same merchant and amount one billing cycle back (rent, a debit order) is never an anomaly.
+      # A quicker repeat doesn't count, so a fraudster can't clear a flagged amount by paying it twice.
+      repeat-min-age: 25d
+      repeat-max-age: 35d # spans a 31-day month
     velocity:
       enabled: true
       score: 40

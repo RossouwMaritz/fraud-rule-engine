@@ -22,7 +22,8 @@ class FraudRulesPropertiesTest {
 			var properties = context.getBean(FraudRulesProperties.class);
 			assertThat(properties.bands()).isEqualTo(new FraudRulesProperties.Bands(40, 80));
 			assertThat(properties.rules().amountAnomaly().lookback()).isEqualTo(Duration.ofDays(30));
-			assertThat(properties.rules().amountAnomaly().repeatLookback()).isEqualTo(Duration.ofDays(35));
+			assertThat(properties.rules().amountAnomaly().repeatMinAge()).isEqualTo(Duration.ofDays(25));
+			assertThat(properties.rules().amountAnomaly().repeatMaxAge()).isEqualTo(Duration.ofDays(35));
 			assertThat(properties.rules().highRiskCategory().categories()).containsExactlyInAnyOrder("GAMBLING",
 					"CRYPTO", "MONEY_TRANSFER");
 		});
@@ -32,6 +33,12 @@ class FraudRulesPropertiesTest {
 	void bandsOutOfOrderFailStartup() {
 		runner.withPropertyValues("fraud.bands.review-from=90")
 			.run(context -> assertThat(context).getFailure().rootCause().hasMessageContaining("high-risk-from"));
+	}
+
+	@Test
+	void repeatWindowOutOfOrderFailsStartup() {
+		runner.withPropertyValues("fraud.rules.amount-anomaly.repeat-min-age=40d")
+			.run(context -> assertThat(context).getFailure().rootCause().hasMessageContaining("repeat-max-age"));
 	}
 
 	@Test

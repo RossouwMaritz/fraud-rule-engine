@@ -5,7 +5,8 @@ import java.util.Optional;
 
 /**
  * What the rules may know about a customer's past. Loaded before evaluation, so rules never do I/O.
- * {@code repeatPayment} is true when the customer paid this merchant this exact amount within the repeat lookback.
+ * {@code repeatPayment} is true when the customer paid this merchant this exact amount one billing cycle
+ * back: between the repeat min and max age.
  */
 public record CustomerHistory(List<TransactionEvent> recentTransactions,
 		Optional<TransactionEvent> previousCardPresent, AmountStats amountStats, boolean repeatPayment) {
