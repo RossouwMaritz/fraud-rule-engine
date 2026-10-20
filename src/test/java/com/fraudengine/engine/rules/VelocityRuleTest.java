@@ -54,7 +54,7 @@ class VelocityRuleTest {
 	}
 
 	private static CustomerHistory history(List<TransactionEvent> recent) {
-		return new CustomerHistory(recent, Optional.empty(), new AmountStats(0, 0, 0));
+		return new CustomerHistory(recent, Optional.empty(), new AmountStats(0, 0, 0), false);
 	}
 
 	private static Optional<RuleHit> hit(String reason) {

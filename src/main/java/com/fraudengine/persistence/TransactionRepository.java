@@ -35,6 +35,14 @@ public interface TransactionRepository
 			limit 1""")
 	Optional<TransactionEntity> findPreviousCardPresent(String customerId, Instant upTo);
 
+	/** Whether the customer paid this merchant this exact amount with {@code from <= occurredAt < to}. */
+	@Query("""
+			select count(t) > 0 from TransactionEntity t
+			where t.customerId = :customerId and t.merchantId = :merchantId and t.amountMinor = :amountMinor
+			  and t.currency = :currency and t.occurredAt >= :from and t.occurredAt < :to""")
+	boolean existsRepeatPayment(String customerId, String merchantId, long amountMinor, String currency, Instant from,
+			Instant to);
+
 	/** Amount stats over {@code from <= occurredAt < to}. */
 	@Query(value = """
 			select count(*) as count,

@@ -32,6 +32,8 @@ public class EvaluationService {
 
 	private final Duration amountLookback;
 
+	private final Duration repeatLookback;
+
 	public EvaluationService(TransactionRepository repository, RuleEngine engine, MeterRegistry meters,
 			FraudRulesProperties properties) {
 		this.repository = repository;
@@ -40,6 +42,7 @@ public class EvaluationService {
 		// Only VELOCITY reads recent transactions, so load exactly its window.
 		this.recentWindow = properties.rules().velocity().window();
 		this.amountLookback = properties.rules().amountAnomaly().lookback();
+		this.repeatLookback = properties.rules().amountAnomaly().repeatLookback();
 	}
 
 	@Transactional
@@ -71,7 +74,9 @@ public class EvaluationService {
 						.map(TransactionEntity::toEvent)
 						.toList(),
 					repository.findPreviousCardPresent(txn.customerId(), at).map(TransactionEntity::toEvent),
-					repository.amountStats(txn.customerId(), at.minus(amountLookback), at));
+					repository.amountStats(txn.customerId(), at.minus(amountLookback), at),
+					repository.existsRepeatPayment(txn.customerId(), txn.merchantId(), txn.amountMinor(),
+							txn.currency(), at.minus(repeatLookback), at));
 			var evaluation = engine.evaluate(txn, history);
 			// Flush now so a failed insert stops us before the metrics and the log claim success.
 			repository.saveAndFlush(TransactionEntity.of(txn, evaluation));

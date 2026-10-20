@@ -34,7 +34,9 @@ public class AmountAnomalyRule implements FraudRule {
 	public Optional<RuleHit> evaluate(TransactionEvent txn, CustomerHistory history) {
 		var stats = history.amountStats();
 		// A stddev of 0 means every past amount was the same; nothing meaningful to compare against.
-		if (stats.count() < config.minHistory() || stats.stddev() == 0) {
+		// A repeat payment (rent, a debit order) is a known amount. Its own last payment inflates the stats too
+		// little to clear it once the customer has 10+ small payments around it.
+		if (stats.count() < config.minHistory() || stats.stddev() == 0 || history.repeatPayment()) {
 			return Optional.empty();
 		}
 		double limit = stats.mean() + config.stddevMultiplier() * stats.stddev();

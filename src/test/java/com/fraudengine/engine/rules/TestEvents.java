@@ -19,13 +19,13 @@ final class TestEvents {
 
 	static final FraudRulesProperties PROPERTIES = new FraudRulesProperties(new FraudRulesProperties.Bands(40, 80),
 			new FraudRulesProperties.Rules(new FraudRulesProperties.HighAmount(true, 40, 5_000_000),
-					new FraudRulesProperties.AmountAnomaly(true, 50, 10, Duration.ofDays(30), 3),
+					new FraudRulesProperties.AmountAnomaly(true, 50, 10, Duration.ofDays(30), 3, Duration.ofDays(35)),
 					new FraudRulesProperties.Velocity(true, 40, 5, Duration.ofMinutes(10)),
 					new FraudRulesProperties.CountryHop(true, 80, Duration.ofHours(2)),
 					new FraudRulesProperties.HighRiskCategory(true, 20, Set.of("GAMBLING", "CRYPTO", "MONEY_TRANSFER"))));
 
 	static final CustomerHistory NO_HISTORY = new CustomerHistory(List.of(), Optional.empty(),
-			new AmountStats(0, 0, 0));
+			new AmountStats(0, 0, 0), false);
 
 	private TestEvents() {
 	}

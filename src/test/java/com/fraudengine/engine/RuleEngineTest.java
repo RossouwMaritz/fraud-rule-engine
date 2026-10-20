@@ -19,7 +19,7 @@ class RuleEngineTest {
 			"GROCERIES", Channel.CARD_PRESENT, "ZA", Instant.parse("2026-10-19T10:00:00Z"));
 
 	private static final CustomerHistory NO_HISTORY = new CustomerHistory(List.of(), Optional.empty(),
-			new AmountStats(0, 0, 0));
+			new AmountStats(0, 0, 0), false);
 
 	@Test
 	void noHitsIsClean() {

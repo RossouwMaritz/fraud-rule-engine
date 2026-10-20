@@ -35,7 +35,7 @@ class CountryHopRuleTest {
 			long gapMinutes, String reason) {
 		var previous = Optional.ofNullable(previousCountry)
 			.map(country -> event(Channel.CARD_PRESENT, country, NOW.minusSeconds(60 * gapMinutes)));
-		var history = new CustomerHistory(List.of(), previous, new AmountStats(0, 0, 0));
+		var history = new CustomerHistory(List.of(), previous, new AmountStats(0, 0, 0), false);
 
 		assertThat(rule.evaluate(event(channel, "GB", NOW), history))
 			.isEqualTo(Optional.ofNullable(reason).map(r -> new RuleHit("COUNTRY_HOP", 80, r)));

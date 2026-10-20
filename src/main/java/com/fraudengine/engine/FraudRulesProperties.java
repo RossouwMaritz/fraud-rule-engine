@@ -38,7 +38,8 @@ public record FraudRulesProperties(@NotNull @Valid Bands bands, @NotNull @Valid 
 	}
 
 	public record AmountAnomaly(boolean enabled, @Min(0) int score, @Positive int minHistory,
-			@NotNull @DurationMin(seconds = 1) Duration lookback, @Positive double stddevMultiplier) {
+			@NotNull @DurationMin(seconds = 1) Duration lookback, @Positive double stddevMultiplier,
+			@NotNull @DurationMin(seconds = 1) Duration repeatLookback) {
 	}
 
 	public record Velocity(boolean enabled, @Min(0) int score, @Positive int maxCount,

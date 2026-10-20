@@ -22,6 +22,7 @@ class FraudRulesPropertiesTest {
 			var properties = context.getBean(FraudRulesProperties.class);
 			assertThat(properties.bands()).isEqualTo(new FraudRulesProperties.Bands(40, 80));
 			assertThat(properties.rules().amountAnomaly().lookback()).isEqualTo(Duration.ofDays(30));
+			assertThat(properties.rules().amountAnomaly().repeatLookback()).isEqualTo(Duration.ofDays(35));
 			assertThat(properties.rules().highRiskCategory().categories()).containsExactlyInAnyOrder("GAMBLING",
 					"CRYPTO", "MONEY_TRANSFER");
 		});

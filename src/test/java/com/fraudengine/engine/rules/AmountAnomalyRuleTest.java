@@ -6,6 +6,7 @@ import java.util.Optional;
 import com.fraudengine.engine.AmountStats;
 import com.fraudengine.engine.CustomerHistory;
 import com.fraudengine.engine.RuleHit;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 
@@ -29,10 +30,17 @@ class AmountAnomalyRuleTest {
 	})
 	void firesOnlyOverMeanPlusStddevsWithEnoughHistory(long count, double mean, double stddev, long amountMinor,
 			String reason) {
-		var history = new CustomerHistory(List.of(), Optional.empty(), new AmountStats(count, mean, stddev));
+		var history = new CustomerHistory(List.of(), Optional.empty(), new AmountStats(count, mean, stddev), false);
 
 		assertThat(rule.evaluate(event(amountMinor, "GROCERIES"), history))
 			.isEqualTo(Optional.ofNullable(reason).map(r -> new RuleHit("AMOUNT_ANOMALY", 50, r)));
+	}
+
+	@Test
+	void repeatPaymentNeverFires() {
+		var history = new CustomerHistory(List.of(), Optional.empty(), new AmountStats(10, 45000, 5000), true);
+
+		assertThat(rule.evaluate(event(99999, "GROCERIES"), history)).isEmpty();
 	}
 
 }
