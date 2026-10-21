@@ -35,9 +35,29 @@ class CountryHopRuleTest {
 			long gapMinutes, String reason) {
 		var previous = Optional.ofNullable(previousCountry)
 			.map(country -> event(Channel.CARD_PRESENT, country, NOW.minusSeconds(60 * gapMinutes)));
-		var history = new CustomerHistory(List.of(), previous, new AmountStats(0, 0, 0), false);
+		var history = new CustomerHistory(List.of(), previous, Optional.empty(), new AmountStats(0, 0, 0), false);
 
 		assertThat(rule.evaluate(event(channel, "GB", NOW), history))
+			.isEqualTo(Optional.ofNullable(reason).map(r -> new RuleHit("COUNTRY_HOP", 80, r)));
+	}
+
+	// A late event: this GB transaction at NOW arrives after a stored card-present one gapMinutes later.
+	// The previous one, when there is one, is in GB 10 minutes earlier, so it never fires on its own.
+	@ParameterizedTest
+	@CsvSource(delimiter = '|', value = { //
+			"ZA | 119 |      | Card-present in GB 119 minutes before card-present in ZA (window 2 hours)",
+			"ZA | 120 |      |", // exactly the window
+			"GB |  30 |      |", // same country
+			"ZA |  30 | true | Card-present in GB 30 minutes before card-present in ZA (window 2 hours)"
+	})
+	void firesForAStoredCardPresentTransactionAfterThisOne(String nextCountry, long gapMinutes,
+			Boolean withSameCountryPrevious, String reason) {
+		var previous = Optional.ofNullable(withSameCountryPrevious)
+			.map(x -> event(Channel.CARD_PRESENT, "GB", NOW.minusSeconds(600)));
+		var next = Optional.of(event(Channel.CARD_PRESENT, nextCountry, NOW.plusSeconds(60 * gapMinutes)));
+		var history = new CustomerHistory(List.of(), previous, next, new AmountStats(0, 0, 0), false);
+
+		assertThat(rule.evaluate(event(Channel.CARD_PRESENT, "GB", NOW), history))
 			.isEqualTo(Optional.ofNullable(reason).map(r -> new RuleHit("COUNTRY_HOP", 80, r)));
 	}
 

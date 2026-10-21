@@ -4,6 +4,7 @@ import java.time.Duration;
 import java.time.Instant;
 
 import com.fraudengine.TestcontainersConfiguration;
+import com.fraudengine.engine.FraudRulesProperties;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -80,6 +81,19 @@ class FraudApiControllerTest {
 	void occurredAtSlightlyInTheFutureIsAccepted() throws Exception {
 		postTransaction(json("txn_api_skew", "cus_api_skew", 10_000, "GROCERIES", "ONLINE", "ZA",
 				Instant.now().plus(Duration.ofMinutes(4))))
+			.andExpect(status().isCreated());
+	}
+
+	@Test
+	void occurredAtOlderThanMaxEventAgeIs400(@Autowired FraudRulesProperties properties) throws Exception {
+		var oldest = Instant.now().minus(properties.maxEventAge());
+		postTransaction(json("txn_api_old", "cus_api_old", 10_000, "GROCERIES", "ONLINE", "ZA",
+				oldest.minus(Duration.ofMinutes(1))))
+			.andExpect(status().isBadRequest())
+			.andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON))
+			.andExpect(jsonPath("$.errors[*].field").value(contains("occurredAt")));
+		postTransaction(json("txn_api_late", "cus_api_old", 10_000, "GROCERIES", "ONLINE", "ZA",
+				oldest.plus(Duration.ofMinutes(1))))
 			.andExpect(status().isCreated());
 	}
 

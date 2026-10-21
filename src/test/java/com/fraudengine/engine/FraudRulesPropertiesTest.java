@@ -21,6 +21,7 @@ class FraudRulesPropertiesTest {
 		runner.run(context -> {
 			var properties = context.getBean(FraudRulesProperties.class);
 			assertThat(properties.bands()).isEqualTo(new FraudRulesProperties.Bands(40, 80));
+			assertThat(properties.maxEventAge()).isEqualTo(Duration.ofDays(45));
 			assertThat(properties.rules().amountAnomaly().lookback()).isEqualTo(Duration.ofDays(30));
 			assertThat(properties.rules().amountAnomaly().repeatMinAge()).isEqualTo(Duration.ofDays(25));
 			assertThat(properties.rules().amountAnomaly().repeatMaxAge()).isEqualTo(Duration.ofDays(35));

@@ -2,6 +2,7 @@ package com.fraudengine.api;
 
 import java.net.URI;
 import java.time.Instant;
+import java.util.List;
 
 import com.fraudengine.engine.Decision;
 import com.fraudengine.engine.FraudRulesProperties;
@@ -14,6 +15,7 @@ import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import org.springframework.data.web.PagedModel;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -22,6 +24,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.ErrorResponseException;
 import org.springframework.web.server.ResponseStatusException;
 
 @RestController
@@ -45,6 +48,14 @@ public class FraudApiController {
 	/** 201 for a new evaluation, 200 for a replay of a stored one. */
 	@PostMapping("/transactions")
 	public ResponseEntity<EvaluationResponse> evaluate(@Valid @RequestBody TransactionRequest request) {
+		var maxAge = rules.maxEventAge();
+		if (request.occurredAt().isBefore(Instant.now().minus(maxAge))) {
+			// The same 400 body as a validation error, so callers handle one shape.
+			var problem = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, "Invalid request content.");
+			problem.setProperty("errors", List.of(new ApiExceptionHandler.FieldError("occurredAt",
+					"must be at most %d days old".formatted(maxAge.toDays()))));
+			throw new ErrorResponseException(HttpStatus.BAD_REQUEST, problem, null);
+		}
 		var result = evaluations.evaluate(request.toEvent());
 		var body = EvaluationResponse.of(result);
 		if (result.replay()) {

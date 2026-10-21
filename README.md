@@ -14,7 +14,7 @@ docker compose up --build -d --wait   # returns once the app is healthy
 ./samples/send.sh
 ```
 
-`send.sh` posts the 21 events in `samples/transactions.json` in order. It prints each decision and the rules that fired. If every decision matches the expected one, it exits with `0`. If any doesn't, it exits with `1`. The API key, `local-dev-key`, comes from `.env`.
+`send.sh` posts the 21 events in `samples/transactions.json` in order. It prints each decision and the rules that fired. If every decision matches the expected one, it exits with `0`. If any doesn't, it exits with `1`. The API key, `local-dev-key`, comes from `.env`. It moves every `occurredAt` so the last event lands at midnight (UTC) today, keeping the gaps between events, because the app rejects events more than 45 days old. Running it again the same day replays the stored results. On a later day, start from an empty database first: `docker compose down -v`.
 
 To score one transaction yourself, run the command below. Amounts are in minor units (cents for ZAR), so `6000000` is R60,000.00.
 
@@ -60,7 +60,7 @@ flowchart LR
 2. `FraudApiController` validates the request body.
 3. `EvaluationService` opens one database transaction and locks the customer, so their events are scored one at a time (see [Design decisions](#design-decisions)).
 4. If the transaction ID is already stored, it returns the stored result.
-5. Otherwise it loads the customer's history: recent transactions, their last card-present transaction, and the average and spread of their amounts over 30 days.
+5. Otherwise it loads the customer's history: their transactions within 10 minutes either side, their nearest card-present transaction before and after this one, and the average and spread of their amounts over the 30 days before it.
 6. `RuleEngine` runs every enabled rule, adds up the scores and picks a decision.
 7. The service saves the transaction and the rules that fired, and commits.
 
@@ -72,8 +72,8 @@ Rules never touch the database, so each one is a plain unit test.
 | --- | --- | --- |
 | `HIGH_AMOUNT` | The amount is over `5000000` minor units (R50,000). It's one limit for every currency, with no FX conversion | 40 |
 | `AMOUNT_ANOMALY` | The customer has at least 10 transactions in the last 30 days, and this amount is far above their usual spend: more than their average plus 3 standard deviations. A repeat payment never fires (see below) | 50 |
-| `VELOCITY` | More than 5 of the customer's transactions in the 10 minutes up to and including this one | 40 |
-| `COUNTRY_HOP` | A card-present transaction in a different country from the customer's previous card-present one, less than 2 hours earlier. Online transactions never fire it | 80 |
+| `VELOCITY` | More than 5 of the customer's transactions in any 10 minutes that include this one. Stored transactions after it count too, so a burst that arrives out of order is still caught | 40 |
+| `COUNTRY_HOP` | A card-present transaction in a different country from the customer's nearest card-present one before or after it, less than 2 hours apart. Online transactions never fire it | 80 |
 | `HIGH_RISK_CATEGORY` | The merchant category is `GAMBLING`, `CRYPTO` or `MONEY_TRANSFER` | 20 |
 
 **Decision.** The scores of all hits are added up. Under 40 is `CLEAN`, 40 to 79 is `REVIEW`, and 80 or more is `HIGH_RISK`. If a rule throws, it is logged and listed in `rulesErrored`, and the other rules still count.
@@ -121,7 +121,7 @@ Errors use the standard JSON error format (RFC 9457), with `title`, `status` and
  "errors": [{"field": "currency", "message": "must match \"[A-Z]{3}\""}]}
 ```
 
-Amounts are whole minor units (`125000` is R1,250.00), and `occurredAt` may be at most 5 minutes in the future.
+Amounts are whole minor units (`125000` is R1,250.00), and `occurredAt` may be at most 5 minutes in the future and at most 45 days in the past (`fraud.max-event-age`). An older event gets a `400` on `occurredAt`.
 
 Swagger UI is at <http://localhost:8080/swagger-ui.html>. Click **Authorize** and enter the key to try calls. Health is at `/actuator/health` and needs no key. Prometheus metrics are at `/actuator/prometheus` and need the key.
 
@@ -141,7 +141,9 @@ The rule and engine tests are plain unit tests. The Spring tests start a throwaw
 | Scenario | Rules fired | Decision |
 | --- | --- | --- |
 | Card testing: 7 small charges in 4 minutes | `VELOCITY` from the 6th charge | `REVIEW` (the first 5 are `CLEAN`) |
+| The same 7 charges arriving newest first | `VELOCITY` on the last 2 to arrive | `REVIEW` (the first 5 to arrive are `CLEAN`) |
 | Card-present in ZA, then card-present in GB 40 minutes later | `COUNTRY_HOP` | `HIGH_RISK` |
+| Card-present in GB, then a late card-present in ZA from 30 minutes before it | `COUNTRY_HOP` on the ZA one | `HIGH_RISK` |
 | R60,000 at a gambling merchant | `HIGH_AMOUNT`, `HIGH_RISK_CATEGORY` | `REVIEW` |
 | A spike against a steady history of 15 payments of R300 to R600 | `AMOUNT_ANOMALY` | `REVIEW` |
 | Monthly rent across a 31-day month | none | `CLEAN` |
@@ -154,7 +156,8 @@ The rule and engine tests are plain unit tests. The Spring tests start a throwaw
 ## Design decisions
 
 - **Synchronous REST, no broker.** The caller gets the decision in the response, and one database transaction both evaluates and stores it. So there is no gap where an event is accepted but not yet scored, and no queue to run. If a caller's network drops, it simply retries, and the retry is safe (see Idempotency below).
-- **An advisory lock per customer.** `VELOCITY` and `COUNTRY_HOP` read the customer's earlier transactions. If two events for one customer arrived at the same moment, each could miss the other. So each evaluation first takes a Postgres lock keyed on the customer ID (`pg_advisory_xact_lock`). It's a lock on a name, not on a table row, and Postgres releases it when the transaction commits. Events for one customer run one at a time, and different customers still run in parallel. No extra infrastructure is needed.
+- **An advisory lock per customer.** `VELOCITY` and `COUNTRY_HOP` read the customer's other transactions. If two events for one customer arrived at the same moment, each could miss the other. So each evaluation first takes a Postgres lock keyed on the customer ID (`pg_advisory_xact_lock`). It's a lock on a name, not on a table row, and Postgres releases it when the transaction commits. Events for one customer run one at a time, and different customers still run in parallel. No extra infrastructure is needed.
+- **Event time, both ways.** Real feeds retry, batch and reorder events. So the history rules look at what happened on both sides of an event's `occurredAt`, not only at what arrived before it. A late event gets the flag itself. Decisions already stored are never changed, so an auditor always sees what the engine said at the time. Events more than 45 days old are rejected rather than scored, so a bad timestamp (from 1999, say) can't slip through.
 - **Amounts in minor units.** Amounts are a `long` count of minor units (cents for ZAR), never `double`, so there is no rounding error. The database column is `bigint` with a `> 0` check.
 - **Config in YAML.** Rules are code and thresholds are config. Keeping the config in `application.yml` means it is versioned and reviewed with the code, validated at startup, and readable at `GET /api/v1/rules`. Changing it needs a restart. That's a fair trade for a first version (see "What I'd add next").
 - **Idempotency.** The transaction ID is the primary key. A repeat of a stored ID with the same details returns the stored result with `200` and is not evaluated again, so a retry can't double-count itself in `VELOCITY`. A repeat with different details gets `409`.

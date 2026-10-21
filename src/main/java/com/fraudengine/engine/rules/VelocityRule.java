@@ -1,6 +1,7 @@
 package com.fraudengine.engine.rules;
 
 import java.util.Optional;
+import java.util.stream.Stream;
 
 import com.fraudengine.engine.CustomerHistory;
 import com.fraudengine.engine.FraudRule;
@@ -30,14 +31,20 @@ public class VelocityRule implements FraudRule {
 
 	@Override
 	public Optional<RuleHit> evaluate(TransactionEvent txn, CustomerHistory history) {
-		var to = txn.occurredAt();
-		var from = to.minus(config.window());
-		// History holds only stored transactions, so add 1 for this one. Both window ends count.
-		long count = 1 + history.recentTransactions()
-			.stream()
-			.map(TransactionEvent::occurredAt)
-			.filter(at -> !at.isBefore(from) && !at.isAfter(to))
-			.count();
+		var at = txn.occurredAt();
+		var window = config.window();
+		// History holds only stored transactions, so add this one. Events can arrive late, so count the busiest
+		// window that contains this event, which may start before it or end after it. Both window ends count.
+		var times = Stream
+			.concat(history.recentTransactions().stream().map(TransactionEvent::occurredAt), Stream.of(at))
+			.toList();
+		// shortcut: O(n²) over the events within one window of this one; fine for tens, sort and slide two pointers
+		// if one customer can have thousands.
+		long count = times.stream()
+			.filter(start -> !start.isBefore(at.minus(window)) && !start.isAfter(at))
+			.mapToLong(start -> times.stream().filter(t -> !t.isBefore(start) && !t.isAfter(start.plus(window))).count())
+			.max()
+			.orElseThrow();
 		if (count <= config.maxCount()) {
 			return Optional.empty();
 		}

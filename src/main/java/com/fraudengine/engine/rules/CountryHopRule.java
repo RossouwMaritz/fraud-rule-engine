@@ -36,18 +36,20 @@ public class CountryHopRule implements FraudRule {
 		if (txn.channel() != Channel.CARD_PRESENT) {
 			return Optional.empty();
 		}
+		// A late event can be the first half of a hop whose second half is already stored.
 		return history.previousCardPresent()
-			.filter(prev -> !prev.merchantCountry().equals(txn.merchantCountry()))
-			.flatMap(prev -> {
-				var gap = Duration.between(prev.occurredAt(), txn.occurredAt());
-				if (gap.compareTo(config.window()) >= 0) {
-					return Optional.empty();
-				}
-				return Optional.of(new RuleHit(id(), config.score(),
-						"Card-present in %s %s after card-present in %s (window %s)".formatted(
-								txn.merchantCountry(), Format.duration(gap), prev.merchantCountry(),
-								Format.duration(config.window()))));
-			});
+			.flatMap(prev -> hop(txn, prev, Duration.between(prev.occurredAt(), txn.occurredAt()), "after"))
+			.or(() -> history.nextCardPresent()
+				.flatMap(next -> hop(txn, next, Duration.between(txn.occurredAt(), next.occurredAt()), "before")));
+	}
+
+	private Optional<RuleHit> hop(TransactionEvent txn, TransactionEvent other, Duration gap, String direction) {
+		if (other.merchantCountry().equals(txn.merchantCountry()) || gap.compareTo(config.window()) >= 0) {
+			return Optional.empty();
+		}
+		return Optional.of(new RuleHit(id(), config.score(),
+				"Card-present in %s %s %s card-present in %s (window %s)".formatted(txn.merchantCountry(),
+						Format.duration(gap), direction, other.merchantCountry(), Format.duration(config.window()))));
 	}
 
 }

@@ -35,6 +35,15 @@ public interface TransactionRepository
 			limit 1""")
 	Optional<TransactionEntity> findPreviousCardPresent(String customerId, Instant upTo);
 
+	/** The customer's earliest card-present transaction strictly after {@code after}, for events that arrive late. */
+	@Query("""
+			select t from TransactionEntity t
+			where t.customerId = :customerId and t.channel = com.fraudengine.engine.Channel.CARD_PRESENT
+			  and t.occurredAt > :after
+			order by t.occurredAt
+			limit 1""")
+	Optional<TransactionEntity> findNextCardPresent(String customerId, Instant after);
+
 	/** Whether the customer paid this merchant this exact amount with {@code from <= occurredAt < to}. */
 	@Query("""
 			select count(t) > 0 from TransactionEntity t

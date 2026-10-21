@@ -12,6 +12,8 @@ fi
 url="${FRAUD_URL:-http://localhost:8080}"
 failed=0
 
+# Move every occurredAt so the last event lands at today's midnight (UTC), keeping the gaps between events. The app
+# rejects events older than fraud.max-event-age, and a second run the same day is a replay.
 while read -r txn; do
     expected=$(jq -r .expect <<<"$txn")
     response=$(curl -sS --fail-with-body "$url/api/v1/transactions" -H "X-API-Key: $FRAUD_API_KEY" \
@@ -25,6 +27,7 @@ while read -r txn; do
     fi
     printf '%-16s %-10s %s%s\n' "$(jq -r .transactionId <<<"$response")" "$decision" \
         "$(jq -r '[.hits[].ruleId] | join(" ")' <<<"$response")" "$mark"
-done < <(jq -c '.[]' samples/transactions.json)
+done < <(jq -c '((now | floor | . - . % 86400) - (map(.occurredAt | fromdateiso8601) | max)) as $shift
+    | .[] | .occurredAt |= (fromdateiso8601 + $shift | todateiso8601)' samples/transactions.json)
 
 exit "$failed"

@@ -41,7 +41,7 @@ public class EvaluationService {
 		this.repository = repository;
 		this.engine = engine;
 		this.meters = meters;
-		// Only VELOCITY reads recent transactions, so load exactly its window.
+		// Only VELOCITY reads recent transactions, so load exactly its window, on both sides of the event.
 		this.recentWindow = properties.rules().velocity().window();
 		this.amountLookback = properties.rules().amountAnomaly().lookback();
 		this.repeatMinAge = properties.rules().amountAnomaly().repeatMinAge();
@@ -52,7 +52,7 @@ public class EvaluationService {
 	public EvaluationResult evaluate(TransactionEvent txn) {
 		var sample = Timer.start(meters);
 		try {
-			// Serialise each customer's events so history rules see the ones before them.
+			// Serialise each customer's events so history rules see each other's events.
 			repository.lockCustomer(txn.customerId());
 
 			var stored = repository.findById(txn.transactionId());
@@ -69,14 +69,15 @@ public class EvaluationService {
 				return result;
 			}
 
-			// Load history before saving, so it holds only earlier transactions.
+			// Load history before saving, so it never holds this transaction.
 			var at = txn.occurredAt();
 			var history = new CustomerHistory(
-					repository.findRecent(txn.customerId(), at.minus(recentWindow), at)
+					repository.findRecent(txn.customerId(), at.minus(recentWindow), at.plus(recentWindow))
 						.stream()
 						.map(TransactionEntity::toEvent)
 						.toList(),
 					repository.findPreviousCardPresent(txn.customerId(), at).map(TransactionEntity::toEvent),
+					repository.findNextCardPresent(txn.customerId(), at).map(TransactionEntity::toEvent),
 					repository.amountStats(txn.customerId(), at.minus(amountLookback), at),
 					repository.existsRepeatPayment(txn.customerId(), txn.merchantId(), txn.amountMinor(),
 							txn.currency(), at.minus(repeatMaxAge), at.minus(repeatMinAge)));

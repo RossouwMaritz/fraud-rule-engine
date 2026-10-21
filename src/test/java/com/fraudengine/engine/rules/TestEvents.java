@@ -23,9 +23,10 @@ final class TestEvents {
 							Duration.ofDays(35)),
 					new FraudRulesProperties.Velocity(true, 40, 5, Duration.ofMinutes(10)),
 					new FraudRulesProperties.CountryHop(true, 80, Duration.ofHours(2)),
-					new FraudRulesProperties.HighRiskCategory(true, 20, Set.of("GAMBLING", "CRYPTO", "MONEY_TRANSFER"))));
+					new FraudRulesProperties.HighRiskCategory(true, 20, Set.of("GAMBLING", "CRYPTO", "MONEY_TRANSFER"))),
+			Duration.ofDays(45));
 
-	static final CustomerHistory NO_HISTORY = new CustomerHistory(List.of(), Optional.empty(),
+	static final CustomerHistory NO_HISTORY = new CustomerHistory(List.of(), Optional.empty(), Optional.empty(),
 			new AmountStats(0, 0, 0), false);
 
 	private TestEvents() {

@@ -56,6 +56,28 @@ class FraudScenariosIT {
 		}
 	}
 
+	// The same burst, arriving newest first: a feed that retries or batches. The last 2 to arrive are flagged.
+	@Test
+	void cardTestingArrivingInReverseOrderIsStillFlagged() throws Exception {
+		var customer = new Customer("cus_sc_cardtest_late");
+		var start = Instant.parse("2026-10-01T02:13:00Z");
+		for (int i = 6; i >= 0; i--) {
+			var expected = i > 1 ? CLEAN : REVIEW;
+			var rules = i > 1 ? new String[0] : new String[] { "VELOCITY" };
+			customer.pay(500 + 100L * i, "mer_webshop", "DIGITAL_GOODS", "ONLINE", "US", start.plusSeconds(40L * i))
+				.expect(expected, rules);
+		}
+	}
+
+	@Test
+	void lateCardPresentInZaBeforeAStoredGbOneIsHighRisk() throws Exception {
+		var customer = new Customer("cus_sc_hop_late");
+		var gb = Instant.parse("2026-10-02T10:30:00Z");
+		customer.pay(120_000, "mer_london", "RETAIL", "CARD_PRESENT", "GB", gb).expect(CLEAN);
+		customer.pay(45_000, "mer_grocer_1", "GROCERIES", "CARD_PRESENT", "ZA", gb.minus(Duration.ofMinutes(30)))
+			.expect(HIGH_RISK, "COUNTRY_HOP");
+	}
+
 	@Test
 	void cardPresentInZaThenGb40MinutesLaterIsHighRisk() throws Exception {
 		var customer = new Customer("cus_sc_hop");

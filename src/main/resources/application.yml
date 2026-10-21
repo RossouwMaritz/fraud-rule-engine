@@ -11,6 +11,8 @@ spring:
 
 fraud:
   api-key: ${FRAUD_API_KEY} # no default, so the app won't start without it
+  # An older occurredAt gets 400. Late events are still scored, against what happened on both sides of them.
+  max-event-age: 45d
   bands:
     review-from: 40
     high-risk-from: 80

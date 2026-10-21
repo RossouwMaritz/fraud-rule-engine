@@ -14,9 +14,11 @@ import org.hibernate.validator.constraints.time.DurationMin;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.validation.annotation.Validated;
 
+/** {@code maxEventAge}: an event whose {@code occurredAt} is older than this is rejected, not scored. */
 @Validated
 @ConfigurationProperties("fraud")
-public record FraudRulesProperties(@NotNull @Valid Bands bands, @NotNull @Valid Rules rules) {
+public record FraudRulesProperties(@NotNull @Valid Bands bands, @NotNull @Valid Rules rules,
+		@NotNull @DurationMin(days = 1) Duration maxEventAge) {
 
 	/** Lowest total score for each decision. Anything below {@code reviewFrom} is CLEAN. */
 	public record Bands(@Min(1) int reviewFrom, @Min(1) int highRiskFrom) {
