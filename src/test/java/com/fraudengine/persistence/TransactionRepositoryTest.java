@@ -34,7 +34,7 @@ class TransactionRepositoryTest {
 	@Test
 	void savesTransactionWithHitsAndReadsItBack() {
 		var txn = new TransactionEntity("txn_1", "cus_1", 6_000_000, "ZAR", "mer_1", "GAMBLING", Channel.CARD_PRESENT,
-				"ZA", T0, 60, Decision.REVIEW, List.of("VELOCITY"));
+				"ZA", T0, 60, Decision.REVIEW, List.of("VELOCITY"), "unknown");
 		txn.addHit(new RuleHitEntity("HIGH_AMOUNT", 40, "R60000.00 is over the R50000.00 limit"));
 		txn.addHit(new RuleHitEntity("HIGH_RISK_CATEGORY", 20, "GAMBLING is a high-risk category"));
 		repository.save(txn);
@@ -49,6 +49,7 @@ class TransactionRepositoryTest {
 		assertThat(stored.getChannel()).isEqualTo(Channel.CARD_PRESENT);
 		assertThat(stored.getDecision()).isEqualTo(Decision.REVIEW);
 		assertThat(stored.getRulesErrored()).containsExactly("VELOCITY");
+		assertThat(stored.getConfigVersion()).isEqualTo("unknown");
 		assertThat(stored.getReceivedAt()).isNotNull();
 		assertThat(stored.getHits()).extracting(RuleHitEntity::getRuleId, RuleHitEntity::getScore)
 			.containsExactlyInAnyOrder(tuple("HIGH_AMOUNT", 40), tuple("HIGH_RISK_CATEGORY", 20));
@@ -74,9 +75,9 @@ class TransactionRepositoryTest {
 				txn("f", "cus_1", 9_999, Channel.ONLINE, "ZA", T0.minusSeconds(9000)),
 				txn("g", "cus_2", 9_999, Channel.ONLINE, "ZA", T0.minusSeconds(1000)),
 				new TransactionEntity("h", "cus_1", 9_999, "ZAR", "mer_1", "GAMBLING", Channel.ONLINE, "ZA",
-						T0.minusSeconds(1000), 50, Decision.REVIEW, List.of()),
+						T0.minusSeconds(1000), 50, Decision.REVIEW, List.of(), "unknown"),
 				new TransactionEntity("i", "cus_1", 9_999, "USD", "mer_1", "GAMBLING", Channel.ONLINE, "ZA",
-						T0.minusSeconds(1000), 0, Decision.CLEAN, List.of()));
+						T0.minusSeconds(1000), 0, Decision.CLEAN, List.of(), "unknown"));
 
 		var stats = repository.amountStats("cus_1", "ZAR", T0.minusSeconds(5000), T0);
 
@@ -141,7 +142,7 @@ class TransactionRepositoryTest {
 	private static TransactionEntity txn(String id, String customerId, long amountMinor, Channel channel,
 			String country, Instant occurredAt) {
 		return new TransactionEntity(id, customerId, amountMinor, "ZAR", "mer_1", "GAMBLING", channel, country,
-				occurredAt, 0, Decision.CLEAN, List.of());
+				occurredAt, 0, Decision.CLEAN, List.of(), "unknown");
 	}
 
 }

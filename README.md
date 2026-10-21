@@ -38,7 +38,8 @@ Location: /api/v1/transactions/txn_readme_01
     {"ruleId": "HIGH_AMOUNT", "score": 40, "reason": "ZAR 60,000.00 is over the ZAR 50,000.00 limit"},
     {"ruleId": "HIGH_RISK_CATEGORY", "score": 20, "reason": "Merchant category GAMBLING is on the high-risk list"}
   ],
-  "rulesErrored": []
+  "rulesErrored": [],
+  "configVersion": "ee11bf40c8cf"
 }
 ```
 
@@ -62,7 +63,7 @@ flowchart LR
 4. If the transaction ID is already stored, it returns the stored result.
 5. Otherwise it loads the customer's history: their transactions within 10 minutes either side, their nearest card-present transaction before and after this one, and the average and spread of their amounts in the same currency over the 30 days before it.
 6. `RuleEngine` runs every enabled rule, adds up the scores and picks a decision.
-7. The service saves the transaction and the rules that fired, and commits.
+7. The service saves the transaction, the rules that fired and the config version, and commits.
 
 Rules never touch the database, so each one is a plain unit test.
 
@@ -97,6 +98,15 @@ fraud:
 
 `GET /api/v1/rules` shows the config the app is running with.
 
+**Config versions.** At startup the app hashes the bands and rules (SHA-256 of their JSON, first 12 hex characters) into a `configVersion`, logs it, and stores the config in the `rule_configs` table if it's new. Every decision stores the version it was made with, and the API returns it. So an auditor can look up the exact thresholds behind a decision months later:
+
+```sql
+select c.config from transactions t join rule_configs c on c.version = t.config_version
+where t.transaction_id = 'txn_readme_01';
+```
+
+Decisions stored before versions existed point at `unknown`, whose config is `{}`. Reordering a list in `application.yml`, like the high-risk categories, gives a new version even though the rules work the same.
+
 ## Adding a rule
 
 1. **Write the rule.** Add a `@Component` in `com.fraudengine.engine.rules` that implements `FraudRule`, with `id()`, `enabled()` and `evaluate()`. It must use only its arguments, with no I/O. `HighRiskCategoryRule` is the shortest example. `RuleEngine` picks it up automatically.
@@ -112,7 +122,7 @@ Every `/api/**` call needs the `X-API-Key` header. A missing or wrong key gets `
 | `POST /api/v1/transactions` | `201` with the evaluation. Sending the same transaction again gets `200` with the stored result, and a reused ID with different details gets `409` (see [Idempotency](#design-decisions)) |
 | `GET /api/v1/transactions/{id}` | `200` with the transaction and its evaluation, or `404` |
 | `GET /api/v1/flags` | A page of `REVIEW` and `HIGH_RISK` transactions, newest first. Filters: `customerId`, `decision`, `ruleId`, `from` (inclusive), `to` (exclusive), `page`, `size` (max 100) |
-| `GET /api/v1/rules` | The bands and rule config the app is running with |
+| `GET /api/v1/rules` | The bands and rule config the app is running with, and its `configVersion` |
 
 Errors use the standard JSON error format (RFC 9457), with `title`, `status` and `detail` fields. A validation `400` adds an `errors` list:
 
@@ -159,7 +169,7 @@ The rule and engine tests are plain unit tests. The Spring tests start a throwaw
 - **An advisory lock per customer.** `VELOCITY` and `COUNTRY_HOP` read the customer's other transactions. If two events for one customer arrived at the same moment, each could miss the other. So each evaluation first takes a Postgres lock keyed on the customer ID (`pg_advisory_xact_lock`). It's a lock on a name, not on a table row, and Postgres releases it when the transaction commits. Events for one customer run one at a time, and different customers still run in parallel. No extra infrastructure is needed.
 - **Event time, both ways.** Real feeds retry, batch and reorder events. So the history rules look at what happened on both sides of an event's `occurredAt`, not only at what arrived before it. A late event gets the flag itself. Decisions already stored are never changed, so an auditor always sees what the engine said at the time. Events more than 45 days old are rejected rather than scored, so a bad timestamp (from 1999, say) can't slip through.
 - **Amounts in minor units.** Amounts are a `long` count of minor units (cents for ZAR), never `double`, so there is no rounding error. The database column is `bigint` with a `> 0` check.
-- **Config in YAML.** Rules are code and thresholds are config. Keeping the config in `application.yml` means it is versioned and reviewed with the code, validated at startup, and readable at `GET /api/v1/rules`. Changing it needs a restart. That's a fair trade for a first version (see "What I'd add next").
+- **Config in YAML.** Rules are code and thresholds are config. Keeping the config in `application.yml` means it is versioned and reviewed with the code, validated at startup, and readable at `GET /api/v1/rules`. Each decision records which version of it was used. Changing it needs a restart. That's a fair trade for a first version (see "What I'd add next").
 - **Idempotency.** The transaction ID is the primary key. A repeat of a stored ID with the same details returns the stored result with `200` and is not evaluated again, so a retry can't double-count itself in `VELOCITY`. A repeat with different details gets `409`.
 
 ## What I'd add next
@@ -167,7 +177,6 @@ The rule and engine tests are plain unit tests. The Spring tests start a throwaw
 - **A broker with a dead-letter queue** (Kafka or SQS), for upstream systems that publish events instead of calling an API.
 - **An analyst review workflow**, to assign, resolve and comment on flags. Resolved cases would also give labelled data.
 - **City-level travel checks.** Country codes miss fast travel inside one country, like Cape Town to Johannesburg in an hour.
-- **Rule versioning in the database**, so each stored decision records the exact config that produced it.
 - **FX conversion to one base currency**, so `AMOUNT_ANOMALY` can use a customer's spend across currencies.
 - **Hot reload** of thresholds without a restart.
 - **ML scoring** as one more rule, next to the readable ones.

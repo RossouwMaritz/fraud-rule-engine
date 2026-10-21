@@ -60,7 +60,8 @@ public class TransactionQueryService {
 	}
 
 	private static StoredTransaction toStored(TransactionEntity entity) {
-		return new StoredTransaction(entity.toEvent(), entity.getReceivedAt(), entity.toEvaluation());
+		return new StoredTransaction(entity.toEvent(), entity.getReceivedAt(), entity.toEvaluation(),
+				entity.getConfigVersion());
 	}
 
 }

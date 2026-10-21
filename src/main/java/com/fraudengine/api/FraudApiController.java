@@ -8,6 +8,7 @@ import java.util.List;
 import com.fraudengine.engine.Decision;
 import com.fraudengine.engine.FraudRulesProperties;
 import com.fraudengine.service.EvaluationService;
+import com.fraudengine.service.RuleConfigVersion;
 import com.fraudengine.service.StoredTransaction;
 import com.fraudengine.service.TransactionQueryService;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
@@ -39,11 +40,14 @@ public class FraudApiController {
 
 	private final FraudRulesProperties rules;
 
+	private final RuleConfigVersion configVersion;
+
 	public FraudApiController(EvaluationService evaluations, TransactionQueryService queries,
-			FraudRulesProperties rules) {
+			FraudRulesProperties rules, RuleConfigVersion configVersion) {
 		this.evaluations = evaluations;
 		this.queries = queries;
 		this.rules = rules;
+		this.configVersion = configVersion;
 	}
 
 	/** 201 for a new evaluation, 200 for a replay of a stored one. */
@@ -88,7 +92,7 @@ public class FraudApiController {
 
 	@GetMapping("/rules")
 	public RulesResponse rules() {
-		return new RulesResponse(rules.bands(), rules.rules());
+		return new RulesResponse(configVersion.version(), rules.bands(), rules.rules());
 	}
 
 }

@@ -5,6 +5,7 @@ import java.time.Instant;
 import com.fraudengine.engine.Evaluation;
 import com.fraudengine.engine.TransactionEvent;
 
-/** A stored transaction and its evaluation, detached from JPA. */
-public record StoredTransaction(TransactionEvent transaction, Instant receivedAt, Evaluation evaluation) {
+/** A stored transaction, its evaluation and the rule config version that produced it, detached from JPA. */
+public record StoredTransaction(TransactionEvent transaction, Instant receivedAt, Evaluation evaluation,
+		String configVersion) {
 }

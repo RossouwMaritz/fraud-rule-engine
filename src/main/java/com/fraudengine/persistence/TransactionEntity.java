@@ -73,6 +73,9 @@ public class TransactionEntity implements Persistable<String> {
 	@Column(columnDefinition = "text[]")
 	private List<String> rulesErrored = new ArrayList<>();
 
+	// The rule_configs row this decision was made with.
+	private String configVersion;
+
 	@OneToMany(mappedBy = "transaction", cascade = CascadeType.ALL, orphanRemoval = true)
 	@OrderBy
 	@BatchSize(size = 100) // the flags page max, so a page loads all its hits in one query
@@ -83,7 +86,7 @@ public class TransactionEntity implements Persistable<String> {
 
 	public TransactionEntity(String transactionId, String customerId, long amountMinor, String currency,
 			String merchantId, String merchantCategory, Channel channel, String merchantCountry, Instant occurredAt,
-			int totalScore, Decision decision, List<String> rulesErrored) {
+			int totalScore, Decision decision, List<String> rulesErrored, String configVersion) {
 		this.transactionId = transactionId;
 		this.customerId = customerId;
 		this.amountMinor = amountMinor;
@@ -96,12 +99,13 @@ public class TransactionEntity implements Persistable<String> {
 		this.totalScore = totalScore;
 		this.decision = decision;
 		this.rulesErrored = new ArrayList<>(rulesErrored);
+		this.configVersion = configVersion;
 	}
 
-	public static TransactionEntity of(TransactionEvent txn, Evaluation evaluation) {
+	public static TransactionEntity of(TransactionEvent txn, Evaluation evaluation, String configVersion) {
 		var entity = new TransactionEntity(txn.transactionId(), txn.customerId(), txn.amountMinor(), txn.currency(),
 				txn.merchantId(), txn.merchantCategory(), txn.channel(), txn.merchantCountry(), txn.occurredAt(),
-				evaluation.totalScore(), evaluation.decision(), evaluation.rulesErrored());
+				evaluation.totalScore(), evaluation.decision(), evaluation.rulesErrored(), configVersion);
 		evaluation.hits().forEach(hit -> entity.addHit(new RuleHitEntity(hit.ruleId(), hit.score(), hit.reason())));
 		return entity;
 	}
@@ -188,6 +192,10 @@ public class TransactionEntity implements Persistable<String> {
 
 	public List<String> getRulesErrored() {
 		return List.copyOf(rulesErrored);
+	}
+
+	public String getConfigVersion() {
+		return configVersion;
 	}
 
 	public List<RuleHitEntity> getHits() {

@@ -5,6 +5,7 @@ import java.time.Instant;
 
 import com.fraudengine.TestcontainersConfiguration;
 import com.fraudengine.engine.FraudRulesProperties;
+import com.fraudengine.service.RuleConfigVersion;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -19,6 +20,7 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
 
 import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.containsInAnyOrder;
+import static org.hamcrest.Matchers.matchesPattern;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
@@ -40,6 +42,9 @@ class FraudApiControllerTest {
 	@Value("${fraud.api-key}")
 	String apiKey;
 
+	@Autowired
+	RuleConfigVersion configVersion;
+
 	@Test
 	void postEvaluatesThenReplayReturnsTheSameBodyWith200() throws Exception {
 		var body = json("txn_api_1", "cus_api_1", 6_000_000, "GAMBLING", "CARD_PRESENT", "ZA", T0);
@@ -51,6 +56,7 @@ class FraudApiControllerTest {
 			.andExpect(jsonPath("$.totalScore").value(60))
 			.andExpect(jsonPath("$.hits[*].ruleId").value(containsInAnyOrder("HIGH_AMOUNT", "HIGH_RISK_CATEGORY")))
 			.andExpect(jsonPath("$.rulesErrored").isEmpty())
+			.andExpect(jsonPath("$.configVersion").value(configVersion.version()))
 			.andReturn()
 			.getResponse()
 			.getContentAsString();
@@ -135,7 +141,8 @@ class FraudApiControllerTest {
 			.andExpect(jsonPath("$.transaction.amountMinor").value(10_000))
 			.andExpect(jsonPath("$.transaction.occurredAt").value("2026-10-19T10:00:00Z"))
 			.andExpect(jsonPath("$.receivedAt").isNotEmpty())
-			.andExpect(jsonPath("$.evaluation.decision").value("CLEAN"));
+			.andExpect(jsonPath("$.evaluation.decision").value("CLEAN"))
+			.andExpect(jsonPath("$.configVersion").value(configVersion.version()));
 	}
 
 	@Test
@@ -183,6 +190,7 @@ class FraudApiControllerTest {
 	void rulesReturnsTheActiveConfig() throws Exception {
 		perform(get("/api/v1/rules"))
 			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.configVersion").value(matchesPattern("[0-9a-f]{12}")))
 			.andExpect(jsonPath("$.bands.reviewFrom").value(40))
 			.andExpect(jsonPath("$.bands.highRiskFrom").value(80))
 			.andExpect(jsonPath("$.bands.ordered").doesNotExist())

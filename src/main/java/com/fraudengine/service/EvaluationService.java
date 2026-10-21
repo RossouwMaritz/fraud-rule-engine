@@ -36,11 +36,14 @@ public class EvaluationService {
 
 	private final Duration repeatMaxAge;
 
+	private final String configVersion;
+
 	public EvaluationService(TransactionRepository repository, RuleEngine engine, MeterRegistry meters,
-			FraudRulesProperties properties) {
+			FraudRulesProperties properties, RuleConfigVersion configVersion) {
 		this.repository = repository;
 		this.engine = engine;
 		this.meters = meters;
+		this.configVersion = configVersion.version();
 		// Only VELOCITY reads recent transactions, so load exactly its window, on both sides of the event.
 		this.recentWindow = properties.rules().velocity().window();
 		this.amountLookback = properties.rules().amountAnomaly().lookback();
@@ -64,7 +67,9 @@ public class EvaluationService {
 				if (!stored.get().toEvent().equals(sameEvent)) {
 					throw new TransactionConflictException(txn.transactionId());
 				}
-				var result = new EvaluationResult(txn.transactionId(), stored.get().toEvaluation(), true);
+				// A replay reports the config it was first scored with, not today's.
+				var result = new EvaluationResult(txn.transactionId(), stored.get().toEvaluation(),
+						stored.get().getConfigVersion(), true);
 				logResult(txn, result);
 				return result;
 			}
@@ -83,11 +88,11 @@ public class EvaluationService {
 							txn.currency(), at.minus(repeatMaxAge), at.minus(repeatMinAge)));
 			var evaluation = engine.evaluate(txn, history);
 			// Flush now so a failed insert stops us before the metrics and the log claim success.
-			repository.saveAndFlush(TransactionEntity.of(txn, evaluation));
+			repository.saveAndFlush(TransactionEntity.of(txn, evaluation, configVersion));
 
 			meters.counter("fraud.evaluations", "decision", evaluation.decision().name()).increment();
 			evaluation.hits().forEach(hit -> meters.counter("fraud.rule.hits", "rule", hit.ruleId()).increment());
-			var result = new EvaluationResult(txn.transactionId(), evaluation, false);
+			var result = new EvaluationResult(txn.transactionId(), evaluation, configVersion, false);
 			logResult(txn, result);
 			return result;
 		}
