@@ -44,21 +44,26 @@ public interface TransactionRepository
 			limit 1""")
 	Optional<TransactionEntity> findNextCardPresent(String customerId, Instant after);
 
-	/** Whether the customer paid this merchant this exact amount with {@code from <= occurredAt < to}. */
+	/**
+	 * Whether the customer made a {@code CLEAN} payment to this merchant of this exact amount with
+	 * {@code from <= occurredAt < to}. A flagged payment doesn't count, so a flagged amount stays flagged next month.
+	 */
 	@Query("""
 			select count(t) > 0 from TransactionEntity t
 			where t.customerId = :customerId and t.merchantId = :merchantId and t.amountMinor = :amountMinor
-			  and t.currency = :currency and t.occurredAt >= :from and t.occurredAt < :to""")
+			  and t.currency = :currency and t.occurredAt >= :from and t.occurredAt < :to
+			  and t.decision = com.fraudengine.engine.Decision.CLEAN""")
 	boolean existsRepeatPayment(String customerId, String merchantId, long amountMinor, String currency, Instant from,
 			Instant to);
 
-	/** Amount stats over {@code from <= occurredAt < to}. */
+	/** Amount stats of {@code CLEAN} transactions over {@code from <= occurredAt < to}, so fraud can't become normal. */
 	@Query(value = """
 			select count(*) as count,
 			       cast(coalesce(avg(amount_minor), 0) as double precision) as mean,
 			       cast(coalesce(stddev_samp(amount_minor), 0) as double precision) as stddev
 			from transactions
-			where customer_id = :customerId and occurred_at >= :from and occurred_at < :to""", nativeQuery = true)
+			where customer_id = :customerId and occurred_at >= :from and occurred_at < :to
+			  and decision = 'CLEAN'""", nativeQuery = true)
 	AmountStats amountStats(String customerId, Instant from, Instant to);
 
 }

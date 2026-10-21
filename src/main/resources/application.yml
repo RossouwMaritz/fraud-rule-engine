@@ -29,6 +29,7 @@ fraud:
       stddev-multiplier: 3
       # The same merchant and amount one billing cycle back (rent, a debit order) is never an anomaly.
       # A quicker repeat doesn't count, so a fraudster can't clear a flagged amount by paying it twice.
+      # Only CLEAN transactions count, for both the baseline and the repeat, so a flagged amount stays flagged.
       repeat-min-age: 25d
       repeat-max-age: 35d # spans a 31-day month
     velocity:

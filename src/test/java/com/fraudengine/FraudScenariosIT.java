@@ -107,6 +107,21 @@ class FraudScenariosIT {
 			.expect(REVIEW, "AMOUNT_ANOMALY");
 	}
 
+	// The flagged spike must not pass as a repeat payment a month later, or the baseline would learn it.
+	@Test
+	void flaggedSpikeRepeatedAMonthLaterIsStillFlagged() throws Exception {
+		var customer = new Customer("cus_sc_spike_repeat");
+		var start = Instant.parse("2026-08-01T17:00:00Z");
+		customer.seedSteadyHistory(start);
+		var spike = start.plus(Duration.ofDays(15));
+		customer.pay(750_000, "mer_electronics", "ELECTRONICS", "ONLINE", "ZA", spike)
+			.expect(REVIEW, "AMOUNT_ANOMALY");
+		// Fresh history, so the second spike still has 10+ transactions in its 30-day window.
+		customer.seedSteadyHistory(spike.plus(Duration.ofDays(1)));
+		customer.pay(750_000, "mer_electronics", "ELECTRONICS", "ONLINE", "ZA", spike.plus(Duration.ofDays(30)))
+			.expect(REVIEW, "AMOUNT_ANOMALY");
+	}
+
 	@Test
 	void monthlyRentInA31DayMonthIsClean() throws Exception {
 		var customer = new Customer("cus_sc_rent");

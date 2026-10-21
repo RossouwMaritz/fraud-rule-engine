@@ -69,10 +69,12 @@ class TransactionRepositoryTest {
 				txn("b", "cus_1", 200, Channel.ONLINE, "ZA", T0.minusSeconds(3000)),
 				txn("c", "cus_1", 300, Channel.ONLINE, "ZA", T0.minusSeconds(2000)),
 				txn("d", "cus_1", 400, Channel.ONLINE, "ZA", T0.minusSeconds(1000)),
-				// Excluded: at the exclusive end, before the window, and another customer.
+				// Excluded: at the exclusive end, before the window, another customer, and flagged.
 				txn("e", "cus_1", 9_999, Channel.ONLINE, "ZA", T0),
 				txn("f", "cus_1", 9_999, Channel.ONLINE, "ZA", T0.minusSeconds(9000)),
-				txn("g", "cus_2", 9_999, Channel.ONLINE, "ZA", T0.minusSeconds(1000)));
+				txn("g", "cus_2", 9_999, Channel.ONLINE, "ZA", T0.minusSeconds(1000)),
+				new TransactionEntity("h", "cus_1", 9_999, "ZAR", "mer_1", "GAMBLING", Channel.ONLINE, "ZA",
+						T0.minusSeconds(1000), 50, Decision.REVIEW, List.of()));
 
 		var stats = repository.amountStats("cus_1", T0.minusSeconds(5000), T0);
 

@@ -71,14 +71,14 @@ Rules never touch the database, so each one is a plain unit test.
 | Rule ID | Fires when (defaults) | Score |
 | --- | --- | --- |
 | `HIGH_AMOUNT` | The amount is over `5000000` minor units (R50,000). It's one limit for every currency, with no FX conversion | 40 |
-| `AMOUNT_ANOMALY` | The customer has at least 10 transactions in the last 30 days, and this amount is far above their usual spend: more than their average plus 3 standard deviations. A repeat payment never fires (see below) | 50 |
+| `AMOUNT_ANOMALY` | The customer has at least 10 `CLEAN` transactions in the last 30 days, and this amount is far above their usual spend: more than their average plus 3 standard deviations. Flagged transactions are left out, so fraud can't raise the baseline. A repeat payment never fires (see below) | 50 |
 | `VELOCITY` | More than 5 of the customer's transactions in any 10 minutes that include this one. Stored transactions after it count too, so a burst that arrives out of order is still caught | 40 |
 | `COUNTRY_HOP` | A card-present transaction in a different country from the customer's nearest card-present one before or after it, less than 2 hours apart. Online transactions never fire it | 80 |
 | `HIGH_RISK_CATEGORY` | The merchant category is `GAMBLING`, `CRYPTO` or `MONEY_TRANSFER` | 20 |
 
 **Decision.** The scores of all hits are added up. Under 40 is `CLEAN`, 40 to 79 is `REVIEW`, and 80 or more is `HIGH_RISK`. If a rule throws, it is logged and listed in `rulesErrored`, and the other rules still count.
 
-**Repeat payments.** Building the scenarios test showed that monthly rent got flagged. One large payment among many small ones always looks unusual. So `AMOUNT_ANOMALY` skips a payment with the same merchant, amount and currency as one 25 to 35 days earlier (35 covers a 31-day month). Without this check, the rent case in the scenarios test comes out `REVIEW`. The 25-day minimum means a fraudster can't clear a flagged amount by just paying it again straight away.
+**Repeat payments.** Building the scenarios test showed that monthly rent got flagged. One large payment among many small ones always looks unusual. So `AMOUNT_ANOMALY` skips a payment with the same merchant, amount and currency as one 25 to 35 days earlier (35 covers a 31-day month). Without this check, the rent case in the scenarios test comes out `REVIEW`. The 25-day minimum means a fraudster can't clear a flagged amount by just paying it again straight away. And only a `CLEAN` earlier payment counts, so a flagged amount is still flagged a month later.
 
 **Tuning.** Every threshold, score and band lives under `fraud:` in `src/main/resources/application.yml`. Any of them can be overridden with an environment variable, for example `FRAUD_RULES_VELOCITY_MAXCOUNT=8` for `fraud.rules.velocity.max-count`. To get the name, uppercase the key, turn dots into underscores and drop the dashes. With Docker, add it to the app's `environment` in `docker-compose.yml`. Restart the app after a change. A bad value (a negative score, `high-risk-from` not above `review-from`) stops the app at startup.
 
