@@ -1,5 +1,7 @@
 # Fraud Rule Engine
 
+## What it is
+
 A Spring Boot service that takes card transaction events, runs each one through a set of configurable fraud rules, and stores the decision with a readable reason for every rule that fired. It **flags** transactions for review and never blocks them.
 
 ## Quick start
@@ -12,9 +14,9 @@ docker compose up --build -d --wait   # returns once the app is healthy
 ./samples/send.sh
 ```
 
-`send.sh` posts the 21 events in `samples/transactions.json` in order. It prints each decision and the rules that fired, and exits with `1` if any decision is not the one expected.
+`send.sh` posts the 21 events in `samples/transactions.json` in order. It prints each decision and the rules that fired. If every decision matches the expected one, it exits with `0`. If any doesn't, it exits with `1`. The API key, `local-dev-key`, comes from `.env`.
 
-To score one transaction yourself:
+To score one transaction yourself, run the command below. Amounts are in minor units (cents for ZAR), so `6000000` is R60,000.00.
 
 ```bash
 curl -i http://localhost:8080/api/v1/transactions \
@@ -54,23 +56,31 @@ flowchart LR
     service <-->|lock, history, save| db[(Postgres)]
 ```
 
-`ApiKeyFilter` checks the key, and `FraudApiController` validates the body. `EvaluationService` then opens one database transaction and takes a Postgres advisory lock on the customer ID. If the transaction ID is already stored, it returns the stored result as a replay. Otherwise it loads the customer's history: recent transactions, their last card-present transaction, and amount stats over 30 days. It passes the event and history to `RuleEngine`, which runs every enabled rule, adds up the scores and picks a decision. The service saves the transaction and its hits and commits. The rules do no I/O, so all of them are plain unit tests.
+1. `ApiKeyFilter` checks the API key.
+2. `FraudApiController` validates the request body.
+3. `EvaluationService` opens one database transaction and locks the customer, so their events are scored one at a time (see [Design decisions](#design-decisions)).
+4. If the transaction ID is already stored, it returns the stored result.
+5. Otherwise it loads the customer's history: recent transactions, their last card-present transaction, and the average and spread of their amounts over 30 days.
+6. `RuleEngine` runs every enabled rule, adds up the scores and picks a decision.
+7. The service saves the transaction and the rules that fired, and commits.
+
+Rules never touch the database, so each one is a plain unit test.
 
 ## Rules
 
 | Rule ID | Fires when (defaults) | Score |
 | --- | --- | --- |
 | `HIGH_AMOUNT` | The amount is over `5000000` minor units (R50,000). It's one limit for every currency, with no FX conversion | 40 |
-| `AMOUNT_ANOMALY` | The customer has at least 10 transactions in the last 30 days, and this amount is more than their mean + 3 × stddev. A repeat payment never fires (see below) | 50 |
+| `AMOUNT_ANOMALY` | The customer has at least 10 transactions in the last 30 days, and this amount is far above their usual spend: more than their average plus 3 standard deviations. A repeat payment never fires (see below) | 50 |
 | `VELOCITY` | More than 5 of the customer's transactions in the 10 minutes up to and including this one | 40 |
 | `COUNTRY_HOP` | A card-present transaction in a different country from the customer's previous card-present one, less than 2 hours earlier. Online transactions never fire it | 80 |
 | `HIGH_RISK_CATEGORY` | The merchant category is `GAMBLING`, `CRYPTO` or `MONEY_TRANSFER` | 20 |
 
 **Decision.** The scores of all hits are added up. Under 40 is `CLEAN`, 40 to 79 is `REVIEW`, and 80 or more is `HIGH_RISK`. If a rule throws, it is logged and listed in `rulesErrored`, and the other rules still count.
 
-**Repeat payments.** Building the scenarios test showed that monthly rent was a false positive. With 10 or more small payments in a month, one repeated large amount always sits more than 3 stddev above the mean. So `AMOUNT_ANOMALY` skips a payment with the same merchant, amount and currency as one made 25 to 35 days earlier (35 covers a 31-day month). With that check turned off, the rent control in the scenarios test comes out `REVIEW`. The 25-day minimum stops a fraudster from clearing a flagged amount by just paying it again straight away.
+**Repeat payments.** Building the scenarios test showed that monthly rent got flagged. One large payment among many small ones always looks unusual. So `AMOUNT_ANOMALY` skips a payment with the same merchant, amount and currency as one 25 to 35 days earlier (35 covers a 31-day month). Without this check, the rent case in the scenarios test comes out `REVIEW`. The 25-day minimum means a fraudster can't clear a flagged amount by just paying it again straight away.
 
-**Tuning.** Every threshold, score and band lives under `fraud:` in `src/main/resources/application.yml`. Any of them can be overridden with an environment variable, for example `FRAUD_RULES_VELOCITY_MAXCOUNT=8`. With Docker, add it to the app's `environment` in `docker-compose.yml`. Restart the app after a change. A bad value (a negative score, `high-risk-from` not above `review-from`) stops the app at startup.
+**Tuning.** Every threshold, score and band lives under `fraud:` in `src/main/resources/application.yml`. Any of them can be overridden with an environment variable, for example `FRAUD_RULES_VELOCITY_MAXCOUNT=8` for `fraud.rules.velocity.max-count`. To get the name, uppercase the key, turn dots into underscores and drop the dashes. With Docker, add it to the app's `environment` in `docker-compose.yml`. Restart the app after a change. A bad value (a negative score, `high-risk-from` not above `review-from`) stops the app at startup.
 
 ```yaml
 fraud:
@@ -99,12 +109,19 @@ Every `/api/**` call needs the `X-API-Key` header. A missing or wrong key gets `
 
 | Method and path | Response |
 | --- | --- |
-| `POST /api/v1/transactions` | `201` with the evaluation. A replay of the same transaction gets `200` with the stored result. Reusing a transaction ID with different details gets `409` |
+| `POST /api/v1/transactions` | `201` with the evaluation. Sending the same transaction again gets `200` with the stored result, and a reused ID with different details gets `409` (see [Idempotency](#design-decisions)) |
 | `GET /api/v1/transactions/{id}` | `200` with the transaction and its evaluation, or `404` |
 | `GET /api/v1/flags` | A page of `REVIEW` and `HIGH_RISK` transactions, newest first. Filters: `customerId`, `decision`, `ruleId`, `from` (inclusive), `to` (exclusive), `page`, `size` (max 100) |
 | `GET /api/v1/rules` | The bands and rule config the app is running with |
 
-Errors are RFC 9457 `ProblemDetail` bodies. A validation `400` lists each bad field. Amounts are integer minor units (`125000` is R1,250.00), and `occurredAt` may be at most 5 minutes in the future.
+Errors use the standard JSON error format (RFC 9457), with `title`, `status` and `detail` fields. A validation `400` adds an `errors` list:
+
+```json
+{"title": "Bad Request", "status": 400, "detail": "Invalid request content.",
+ "errors": [{"field": "currency", "message": "must match \"[A-Z]{3}\""}]}
+```
+
+Amounts are whole minor units (`125000` is R1,250.00), and `occurredAt` may be at most 5 minutes in the future.
 
 Swagger UI is at <http://localhost:8080/swagger-ui.html>. Click **Authorize** and enter the key to try calls. Health is at `/actuator/health` and needs no key. Prometheus metrics are at `/actuator/prometheus` and need the key.
 
@@ -117,28 +134,28 @@ Tests need JDK 25 (check with `java -version`), or set `JAVA_HOME` to point at i
 ./mvnw verify   # the above, plus the FraudScenariosIT integration test
 ```
 
-The rule and engine tests are plain unit tests. The Spring tests run against a real Postgres 17 in Testcontainers, so Docker must be running for both commands. To run only the tests that don't need Docker: `./mvnw test -Dtest='RuleEngineTest,FraudRulesPropertiesTest,*RuleTest'`.
+The rule and engine tests are plain unit tests. The Spring tests start a throwaway Postgres 17 in Docker (using Testcontainers), so Docker must be running for both commands. To run only the tests that don't need Docker: `./mvnw test -Dtest='RuleEngineTest,FraudRulesPropertiesTest,*RuleTest'`.
 
 `FraudScenariosIT` is the evidence that the engine works. It posts events through the real API, with the real database, at fixed timestamps, and checks the exact decision and rule IDs for every event:
 
-| Scenario | Expected |
-| --- | --- |
-| Card testing: 7 small charges in 4 minutes | `VELOCITY` from the 6th charge |
-| Card-present in ZA, then card-present in GB 40 minutes later | `COUNTRY_HOP`, `HIGH_RISK` |
-| R60,000 at a gambling merchant | `HIGH_AMOUNT` + `HIGH_RISK_CATEGORY`, `REVIEW` |
-| A spike against a steady history of 15 payments of R300 to R600 | `AMOUNT_ANOMALY` |
-| Monthly rent across a 31-day month | `CLEAN` |
-| A normal grocery shop | `CLEAN` |
-| An online US purchase straight after card-present in ZA | `CLEAN` |
-| A real trip: card-present in ZA, then GB 11 hours later | `CLEAN` |
+| Scenario | Rules fired | Decision |
+| --- | --- | --- |
+| Card testing: 7 small charges in 4 minutes | `VELOCITY` from the 6th charge | `REVIEW` (the first 5 are `CLEAN`) |
+| Card-present in ZA, then card-present in GB 40 minutes later | `COUNTRY_HOP` | `HIGH_RISK` |
+| R60,000 at a gambling merchant | `HIGH_AMOUNT`, `HIGH_RISK_CATEGORY` | `REVIEW` |
+| A spike against a steady history of 15 payments of R300 to R600 | `AMOUNT_ANOMALY` | `REVIEW` |
+| Monthly rent across a 31-day month | none | `CLEAN` |
+| A normal grocery shop | none | `CLEAN` |
+| An online US purchase straight after card-present in ZA | none | `CLEAN` |
+| A real trip: card-present in ZA, then GB 11 hours later | none | `CLEAN` |
 
 `EvaluationServiceTest` also checks concurrency and replays: 10 events for one customer, posted from parallel threads, give exactly 10 rows with `VELOCITY` on the 6th and later. The same event posted twice gives one row and the same result both times.
 
 ## Design decisions
 
-- **Synchronous REST, no broker.** The caller gets the decision in the response, and one database transaction both evaluates and stores it. So there is no gap where an event is accepted but not yet scored, and no queue to run. If a caller's network drops, it simply retries, and idempotency makes the retry safe.
-- **An advisory lock per customer.** `VELOCITY` and `COUNTRY_HOP` read the customer's earlier transactions. If two events for one customer arrived at the same moment, each could miss the other. So each evaluation first runs `pg_advisory_xact_lock(hashtext(customerId))`. Events for one customer run one at a time, different customers still run in parallel, and the lock is released when the transaction commits. No extra infrastructure is needed.
-- **Amounts in minor units.** Amounts are a `long` count of cents, never `double`, so there is no rounding error. The database column is `bigint` with a `> 0` check.
+- **Synchronous REST, no broker.** The caller gets the decision in the response, and one database transaction both evaluates and stores it. So there is no gap where an event is accepted but not yet scored, and no queue to run. If a caller's network drops, it simply retries, and the retry is safe (see Idempotency below).
+- **An advisory lock per customer.** `VELOCITY` and `COUNTRY_HOP` read the customer's earlier transactions. If two events for one customer arrived at the same moment, each could miss the other. So each evaluation first takes a Postgres lock keyed on the customer ID (`pg_advisory_xact_lock`). It's a lock on a name, not on a table row, and Postgres releases it when the transaction commits. Events for one customer run one at a time, and different customers still run in parallel. No extra infrastructure is needed.
+- **Amounts in minor units.** Amounts are a `long` count of minor units (cents for ZAR), never `double`, so there is no rounding error. The database column is `bigint` with a `> 0` check.
 - **Config in YAML.** Rules are code and thresholds are config. Keeping the config in `application.yml` means it is versioned and reviewed with the code, validated at startup, and readable at `GET /api/v1/rules`. Changing it needs a restart. That's a fair trade for a first version (see "What I'd add next").
 - **Idempotency.** The transaction ID is the primary key. A repeat of a stored ID with the same details returns the stored result with `200` and is not evaluated again, so a retry can't double-count itself in `VELOCITY`. A repeat with different details gets `409`.
 
