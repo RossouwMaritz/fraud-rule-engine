@@ -60,7 +60,7 @@ flowchart LR
 2. `FraudApiController` validates the request body.
 3. `EvaluationService` opens one database transaction and locks the customer, so their events are scored one at a time (see [Design decisions](#design-decisions)).
 4. If the transaction ID is already stored, it returns the stored result.
-5. Otherwise it loads the customer's history: their transactions within 10 minutes either side, their nearest card-present transaction before and after this one, and the average and spread of their amounts over the 30 days before it.
+5. Otherwise it loads the customer's history: their transactions within 10 minutes either side, their nearest card-present transaction before and after this one, and the average and spread of their amounts in the same currency over the 30 days before it.
 6. `RuleEngine` runs every enabled rule, adds up the scores and picks a decision.
 7. The service saves the transaction and the rules that fired, and commits.
 
@@ -70,8 +70,8 @@ Rules never touch the database, so each one is a plain unit test.
 
 | Rule ID | Fires when (defaults) | Score |
 | --- | --- | --- |
-| `HIGH_AMOUNT` | The amount is over `5000000` minor units (R50,000). It's one limit for every currency, with no FX conversion | 40 |
-| `AMOUNT_ANOMALY` | The customer has at least 10 `CLEAN` transactions in the last 30 days, and this amount is far above their usual spend: more than their average plus 3 standard deviations. Flagged transactions are left out, so fraud can't raise the baseline. A repeat payment never fires (see below) | 50 |
+| `HIGH_AMOUNT` | The amount is over its currency's limit: R50,000, $3,000, €3,000 or £2,500. There's no FX conversion. A currency with no limit configured always fires, so it goes to review instead of slipping through | 40 |
+| `AMOUNT_ANOMALY` | The customer has at least 10 `CLEAN` transactions in this currency in the last 30 days, and this amount is far above their usual spend: more than their average plus 3 standard deviations. Flagged transactions are left out, so fraud can't raise the baseline. A repeat payment never fires (see below) | 50 |
 | `VELOCITY` | More than 5 of the customer's transactions in any 10 minutes that include this one. Stored transactions after it count too, so a burst that arrives out of order is still caught | 40 |
 | `COUNTRY_HOP` | A card-present transaction in a different country from the customer's nearest card-present one before or after it, less than 2 hours apart. Online transactions never fire it | 80 |
 | `HIGH_RISK_CATEGORY` | The merchant category is `GAMBLING`, `CRYPTO` or `MONEY_TRANSFER` | 20 |
@@ -80,7 +80,7 @@ Rules never touch the database, so each one is a plain unit test.
 
 **Repeat payments.** Building the scenarios test showed that monthly rent got flagged. One large payment among many small ones always looks unusual. So `AMOUNT_ANOMALY` skips a payment with the same merchant, amount and currency as one 25 to 35 days earlier (35 covers a 31-day month). Without this check, the rent case in the scenarios test comes out `REVIEW`. The 25-day minimum means a fraudster can't clear a flagged amount by just paying it again straight away. And only a `CLEAN` earlier payment counts, so a flagged amount is still flagged a month later. The cost: a new recurring payment that was flagged the first time stays flagged every month, until an analyst workflow can mark it as fine.
 
-**Tuning.** Every threshold, score and band lives under `fraud:` in `src/main/resources/application.yml`. Any of them can be overridden with an environment variable, for example `FRAUD_RULES_VELOCITY_MAXCOUNT=8` for `fraud.rules.velocity.max-count`. To get the name, uppercase the key, turn dots into underscores and drop the dashes. With Docker, add it to the app's `environment` in `docker-compose.yml`. Restart the app after a change. A bad value (a negative score, `high-risk-from` not above `review-from`) stops the app at startup.
+**Tuning.** Every threshold, score and band lives under `fraud:` in `src/main/resources/application.yml`. Any of them can be overridden with an environment variable, for example `FRAUD_RULES_VELOCITY_MAXCOUNT=8` for `fraud.rules.velocity.max-count`. To get the name, uppercase the key, turn dots into underscores and drop the dashes. With Docker, add it to the app's `environment` in `docker-compose.yml`. Restart the app after a change. A bad value (a negative score, a currency limit of zero, `high-risk-from` not above `review-from`) stops the app at startup.
 
 ```yaml
 fraud:
@@ -121,7 +121,7 @@ Errors use the standard JSON error format (RFC 9457), with `title`, `status` and
  "errors": [{"field": "currency", "message": "must match \"[A-Z]{3}\""}]}
 ```
 
-Amounts are whole minor units (`125000` is R1,250.00), and `occurredAt` may be at most 5 minutes in the future and at most 45 days in the past (`fraud.max-event-age`). An older event gets a `400` on `occurredAt`.
+Amounts are whole minor units (`125000` is R1,250.00), `currency` must be a real ISO 4217 code (`QQQ` gets a `400`), and `occurredAt` may be at most 5 minutes in the future and at most 45 days in the past (`fraud.max-event-age`). An older event gets a `400` on `occurredAt`.
 
 Swagger UI is at <http://localhost:8080/swagger-ui.html>. Click **Authorize** and enter the key to try calls. Health is at `/actuator/health` and needs no key. Prometheus metrics are at `/actuator/prometheus` and need the key.
 
@@ -168,7 +168,7 @@ The rule and engine tests are plain unit tests. The Spring tests start a throwaw
 - **An analyst review workflow**, to assign, resolve and comment on flags. Resolved cases would also give labelled data.
 - **City-level travel checks.** Country codes miss fast travel inside one country, like Cape Town to Johannesburg in an hour.
 - **Rule versioning in the database**, so each stored decision records the exact config that produced it.
-- **Per-currency limits** for `HIGH_AMOUNT`, or conversion to one base currency.
+- **FX conversion to one base currency**, so `AMOUNT_ANOMALY` can use a customer's spend across currencies.
 - **Hot reload** of thresholds without a restart.
 - **ML scoring** as one more rule, next to the readable ones.
 - **Real auth** (OAuth2 client credentials or mTLS) instead of one static API key.

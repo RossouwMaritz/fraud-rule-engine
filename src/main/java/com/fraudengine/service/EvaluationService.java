@@ -78,7 +78,7 @@ public class EvaluationService {
 						.toList(),
 					repository.findPreviousCardPresent(txn.customerId(), at).map(TransactionEntity::toEvent),
 					repository.findNextCardPresent(txn.customerId(), at).map(TransactionEntity::toEvent),
-					repository.amountStats(txn.customerId(), at.minus(amountLookback), at),
+					repository.amountStats(txn.customerId(), txn.currency(), at.minus(amountLookback), at),
 					repository.existsRepeatPayment(txn.customerId(), txn.merchantId(), txn.amountMinor(),
 							txn.currency(), at.minus(repeatMaxAge), at.minus(repeatMinAge)));
 			var evaluation = engine.evaluate(txn, history);

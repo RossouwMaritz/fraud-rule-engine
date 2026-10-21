@@ -3,6 +3,7 @@ package com.fraudengine.engine.rules;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
@@ -18,7 +19,8 @@ final class TestEvents {
 	static final Instant NOW = Instant.parse("2026-10-19T10:00:00Z");
 
 	static final FraudRulesProperties PROPERTIES = new FraudRulesProperties(new FraudRulesProperties.Bands(40, 80),
-			new FraudRulesProperties.Rules(new FraudRulesProperties.HighAmount(true, 40, 5_000_000),
+			new FraudRulesProperties.Rules(new FraudRulesProperties.HighAmount(true, 40,
+						Map.of("ZAR", 5_000_000L, "USD", 300_000L, "EUR", 300_000L, "GBP", 250_000L)),
 					new FraudRulesProperties.AmountAnomaly(true, 50, 10, Duration.ofDays(30), 3, Duration.ofDays(25),
 							Duration.ofDays(35)),
 					new FraudRulesProperties.Velocity(true, 40, 5, Duration.ofMinutes(10)),
@@ -33,7 +35,11 @@ final class TestEvents {
 	}
 
 	static TransactionEvent event(long amountMinor, String category) {
-		return new TransactionEvent("txn_1", "cus_1", amountMinor, "ZAR", "mer_1", category, Channel.CARD_PRESENT,
+		return event(amountMinor, "ZAR", category);
+	}
+
+	static TransactionEvent event(long amountMinor, String currency, String category) {
+		return new TransactionEvent("txn_1", "cus_1", amountMinor, currency, "mer_1", category, Channel.CARD_PRESENT,
 				"ZA", NOW);
 	}
 

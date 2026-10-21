@@ -17,13 +17,19 @@ class HighAmountRuleTest {
 
 	@ParameterizedTest
 	@CsvSource(delimiter = '|', value = { //
-			"4999999 |", // just under
-			"5000000 |", // exactly at: the limit itself is allowed
-			"5000001 | ZAR 50,000.01 is over the ZAR 50,000.00 limit", // just over
-			"6000000 | ZAR 60,000.00 is over the ZAR 50,000.00 limit" })
-	void firesOnlyOverTheThreshold(long amountMinor, String reason) {
+			"ZAR | 4999999 |", // just under
+			"ZAR | 5000000 |", // exactly at: the limit itself is allowed
+			"ZAR | 5000001 | ZAR 50,000.01 is over the ZAR 50,000.00 limit", // just over
+			"ZAR | 6000000 | ZAR 60,000.00 is over the ZAR 50,000.00 limit",
+			// Each currency has its own limit: $3,000.00, not 5,000,000 cents.
+			"USD | 299999 |",
+			"USD | 300000 |",
+			"USD | 300001 | USD 3,000.01 is over the USD 3,000.00 limit",
+			// No limit configured, so even a small amount fires.
+			"JPY | 100 | No HIGH_AMOUNT limit configured for JPY" })
+	void firesOnlyOverTheCurrencysThreshold(String currency, long amountMinor, String reason) {
 		// History plays no part, so every case runs with none.
-		assertThat(rule.evaluate(event(amountMinor, "GROCERIES"), NO_HISTORY))
+		assertThat(rule.evaluate(event(amountMinor, currency, "GROCERIES"), NO_HISTORY))
 			.isEqualTo(Optional.ofNullable(reason).map(r -> new RuleHit("HIGH_AMOUNT", 40, r)));
 	}
 

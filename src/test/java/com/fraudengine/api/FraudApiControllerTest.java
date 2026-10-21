@@ -98,6 +98,16 @@ class FraudApiControllerTest {
 	}
 
 	@Test
+	void unknownCurrencyIs400() throws Exception {
+		postTransaction(json("txn_api_qqq", "cus_api_qqq", 10_000, "GROCERIES", "ONLINE", "ZA", T0)
+			.replace("\"ZAR\"", "\"QQQ\""))
+			.andExpect(status().isBadRequest())
+			.andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON))
+			.andExpect(jsonPath("$.errors[*].field").value(contains("currency")));
+		perform(get("/api/v1/transactions/txn_api_qqq")).andExpect(status().isNotFound());
+	}
+
+	@Test
 	void unknownChannelIs400() throws Exception {
 		postTransaction(json("txn_api_ch", "cus_api_ch", 10_000, "GROCERIES", "TELEPATHY", "ZA", T0))
 			.andExpect(status().isBadRequest())
@@ -179,7 +189,7 @@ class FraudApiControllerTest {
 			.andExpect(jsonPath("$.rules.velocity.window").value("PT10M"))
 			.andExpect(jsonPath("$.rules.velocity.enabled").value(true))
 			.andExpect(jsonPath("$.rules.velocity.maxCount").value(5))
-			.andExpect(jsonPath("$.rules.highAmount.thresholdMinor").value(5_000_000));
+			.andExpect(jsonPath("$.rules.highAmount.thresholdsMinor.ZAR").value(5_000_000));
 	}
 
 	private ResultActions postTransaction(String body) throws Exception {

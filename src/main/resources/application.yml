@@ -20,7 +20,12 @@ fraud:
     high-amount:
       enabled: true
       score: 40
-      threshold-minor: 5000000 # R50,000.00
+      # Minor units of each currency. A currency not listed here always fires, so it gets a review.
+      thresholds-minor:
+        ZAR: 5000000 # R50,000.00
+        USD: 300000 # $3,000.00
+        EUR: 300000 # €3,000.00
+        GBP: 250000 # £2,500.00
     amount-anomaly:
       enabled: true
       score: 50

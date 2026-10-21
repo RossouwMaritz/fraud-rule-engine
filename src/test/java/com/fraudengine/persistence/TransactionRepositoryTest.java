@@ -69,14 +69,16 @@ class TransactionRepositoryTest {
 				txn("b", "cus_1", 200, Channel.ONLINE, "ZA", T0.minusSeconds(3000)),
 				txn("c", "cus_1", 300, Channel.ONLINE, "ZA", T0.minusSeconds(2000)),
 				txn("d", "cus_1", 400, Channel.ONLINE, "ZA", T0.minusSeconds(1000)),
-				// Excluded: at the exclusive end, before the window, another customer, and flagged.
+				// Excluded: at the exclusive end, before the window, another customer, flagged, and another currency.
 				txn("e", "cus_1", 9_999, Channel.ONLINE, "ZA", T0),
 				txn("f", "cus_1", 9_999, Channel.ONLINE, "ZA", T0.minusSeconds(9000)),
 				txn("g", "cus_2", 9_999, Channel.ONLINE, "ZA", T0.minusSeconds(1000)),
 				new TransactionEntity("h", "cus_1", 9_999, "ZAR", "mer_1", "GAMBLING", Channel.ONLINE, "ZA",
-						T0.minusSeconds(1000), 50, Decision.REVIEW, List.of()));
+						T0.minusSeconds(1000), 50, Decision.REVIEW, List.of()),
+				new TransactionEntity("i", "cus_1", 9_999, "USD", "mer_1", "GAMBLING", Channel.ONLINE, "ZA",
+						T0.minusSeconds(1000), 0, Decision.CLEAN, List.of()));
 
-		var stats = repository.amountStats("cus_1", T0.minusSeconds(5000), T0);
+		var stats = repository.amountStats("cus_1", "ZAR", T0.minusSeconds(5000), T0);
 
 		assertThat(stats.count()).isEqualTo(4);
 		assertThat(stats.mean()).isCloseTo(250.0, within(1e-9));
@@ -85,7 +87,7 @@ class TransactionRepositoryTest {
 
 	@Test
 	void amountStatsWithNoHistoryIsZero() {
-		assertThat(repository.amountStats("nobody", T0.minusSeconds(5000), T0)).isEqualTo(new AmountStats(0, 0, 0));
+		assertThat(repository.amountStats("nobody", "ZAR", T0.minusSeconds(5000), T0)).isEqualTo(new AmountStats(0, 0, 0));
 	}
 
 	@Test

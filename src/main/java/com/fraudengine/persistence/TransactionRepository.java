@@ -56,14 +56,17 @@ public interface TransactionRepository
 	boolean existsRepeatPayment(String customerId, String merchantId, long amountMinor, String currency, Instant from,
 			Instant to);
 
-	/** Amount stats of {@code CLEAN} transactions over {@code from <= occurredAt < to}, so fraud can't become normal. */
+	/**
+	 * Amount stats of {@code CLEAN} transactions in one currency over {@code from <= occurredAt < to}, so fraud can't
+	 * become normal and rands are only compared with rands.
+	 */
 	@Query(value = """
 			select count(*) as count,
 			       cast(coalesce(avg(amount_minor), 0) as double precision) as mean,
 			       cast(coalesce(stddev_samp(amount_minor), 0) as double precision) as stddev
 			from transactions
-			where customer_id = :customerId and occurred_at >= :from and occurred_at < :to
+			where customer_id = :customerId and currency = :currency and occurred_at >= :from and occurred_at < :to
 			  and decision = 'CLEAN'""", nativeQuery = true)
-	AmountStats amountStats(String customerId, Instant from, Instant to);
+	AmountStats amountStats(String customerId, String currency, Instant from, Instant to);
 
 }

@@ -28,15 +28,19 @@ public class HighAmountRule implements FraudRule {
 		return config.enabled();
 	}
 
-	// shortcut: one threshold in minor units for every currency, fine while all traffic is ZAR; add per-currency limits for FX.
 	@Override
 	public Optional<RuleHit> evaluate(TransactionEvent txn, CustomerHistory history) {
-		if (txn.amountMinor() <= config.thresholdMinor()) {
+		var limit = config.thresholdsMinor().get(txn.currency());
+		if (limit == null) {
+			// We only flag, never block, so an unlisted currency fails safe by going to review.
+			return Optional.of(new RuleHit(id(), config.score(), "No HIGH_AMOUNT limit configured for " + txn.currency()));
+		}
+		if (txn.amountMinor() <= limit) {
 			return Optional.empty();
 		}
 		return Optional.of(new RuleHit(id(), config.score(),
 				"%s is over the %s limit".formatted(Format.money(txn.amountMinor(), txn.currency()),
-						Format.money(config.thresholdMinor(), txn.currency()))));
+						Format.money(limit, txn.currency()))));
 	}
 
 }

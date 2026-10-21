@@ -1,7 +1,10 @@
 package com.fraudengine.engine;
 
 import java.time.Duration;
+import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.validation.Valid;
@@ -36,7 +39,18 @@ public record FraudRulesProperties(@NotNull @Valid Bands bands, @NotNull @Valid 
 			@NotNull @Valid HighRiskCategory highRiskCategory) {
 	}
 
-	public record HighAmount(boolean enabled, @Min(0) int score, @Positive long thresholdMinor) {
+	/** {@code thresholdsMinor}: the limit per currency code, in that currency's minor units. */
+	public record HighAmount(boolean enabled, @Min(0) int score, @NotNull Map<String, @Positive Long> thresholdsMinor) {
+
+		// Env var map keys bind lowercase (FRAUD_RULES_HIGHAMOUNT_THRESHOLDSMINOR_JPY becomes "jpy"), and codes are upper.
+		public HighAmount {
+			if (thresholdsMinor != null) {
+				thresholdsMinor = thresholdsMinor.entrySet()
+					.stream()
+					.collect(Collectors.toMap(e -> e.getKey().toUpperCase(Locale.ROOT), Map.Entry::getValue, (a, b) -> a));
+			}
+		}
+
 	}
 
 	public record AmountAnomaly(boolean enabled, @Min(0) int score, @Positive int minHistory,

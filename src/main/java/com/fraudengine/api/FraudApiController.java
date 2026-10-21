@@ -2,6 +2,7 @@ package com.fraudengine.api;
 
 import java.net.URI;
 import java.time.Instant;
+import java.util.Currency;
 import java.util.List;
 
 import com.fraudengine.engine.Decision;
@@ -50,11 +51,10 @@ public class FraudApiController {
 	public ResponseEntity<EvaluationResponse> evaluate(@Valid @RequestBody TransactionRequest request) {
 		var maxAge = rules.maxEventAge();
 		if (request.occurredAt().isBefore(Instant.now().minus(maxAge))) {
-			// The same 400 body as a validation error, so callers handle one shape.
-			var problem = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, "Invalid request content.");
-			problem.setProperty("errors", List.of(new ApiExceptionHandler.FieldError("occurredAt",
-					"must be at most %d days old".formatted(maxAge.toDays()))));
-			throw new ErrorResponseException(HttpStatus.BAD_REQUEST, problem, null);
+			throw invalidField("occurredAt", "must be at most %d days old".formatted(maxAge.toDays()));
+		}
+		if (Currency.getAvailableCurrencies().stream().noneMatch(c -> c.getCurrencyCode().equals(request.currency()))) {
+			throw invalidField("currency", "must be an ISO 4217 currency code");
 		}
 		var result = evaluations.evaluate(request.toEvent());
 		var body = EvaluationResponse.of(result);
@@ -62,6 +62,13 @@ public class FraudApiController {
 			return ResponseEntity.ok(body);
 		}
 		return ResponseEntity.created(URI.create("/api/v1/transactions/" + result.transactionId())).body(body);
+	}
+
+	// The same 400 body as a validation error, so callers handle one shape.
+	private static ErrorResponseException invalidField(String field, String message) {
+		var problem = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, "Invalid request content.");
+		problem.setProperty("errors", List.of(new ApiExceptionHandler.FieldError(field, message)));
+		return new ErrorResponseException(HttpStatus.BAD_REQUEST, problem, null);
 	}
 
 	@GetMapping("/transactions/{id}")
