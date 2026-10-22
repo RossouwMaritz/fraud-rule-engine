@@ -7,9 +7,12 @@ import com.fraudengine.TestcontainersConfiguration;
 import com.fraudengine.engine.FraudRulesProperties;
 import com.fraudengine.service.RuleConfigVersion;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
@@ -18,6 +21,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.hamcrest.Matchers.matchesPattern;
@@ -29,12 +33,15 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @SpringBootTest
+@ExtendWith(OutputCaptureExtension.class)
 @AutoConfigureMockMvc
 @Import(TestcontainersConfiguration.class)
 @ActiveProfiles("test")
 class FraudApiControllerTest {
 
 	private static final Instant T0 = Instant.parse("2026-10-19T10:00:00Z");
+
+	private static final String UUID_PATTERN = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
 
 	@Autowired
 	MockMvc mvc;
@@ -121,6 +128,25 @@ class FraudApiControllerTest {
 	}
 
 	@Test
+	void callersRequestIdIsReturnedAndOnTheJsonLogLine(CapturedOutput output) throws Exception {
+		postTransaction(json("txn_api_rid", "cus_api_rid", 10_000, "GROCERIES", "ONLINE", "ZA", T0), "req-abc_1.2")
+			.andExpect(status().isCreated())
+			.andExpect(header().string("X-Request-Id", "req-abc_1.2"));
+
+		assertThat(output.getOut().lines().filter(line -> line.contains("transactionId=txn_api_rid")))
+			.singleElement()
+			.satisfies(line -> assertThat(line).startsWith("{").contains("\"requestId\":\"req-abc_1.2\""));
+	}
+
+	@Test
+	void missingOrUnsafeRequestIdGetsANewOne() throws Exception {
+		perform(get("/api/v1/rules")).andExpect(header().string("X-Request-Id", matchesPattern(UUID_PATTERN)));
+		mvc.perform(get("/api/v1/rules").header("X-Request-Id", "bad id\nforged log line"))
+			.andExpect(status().isUnauthorized())
+			.andExpect(header().string("X-Request-Id", matchesPattern(UUID_PATTERN)));
+	}
+
+	@Test
 	void reusedIdWithDifferentDetailsIs409() throws Exception {
 		postTransaction(json("txn_api_dup", "cus_api_dup", 10_000, "GROCERIES", "ONLINE", "ZA", T0))
 			.andExpect(status().isCreated());
@@ -202,6 +228,12 @@ class FraudApiControllerTest {
 
 	private ResultActions postTransaction(String body) throws Exception {
 		return perform(post("/api/v1/transactions").contentType(MediaType.APPLICATION_JSON).content(body));
+	}
+
+	private ResultActions postTransaction(String body, String requestId) throws Exception {
+		return perform(post("/api/v1/transactions").contentType(MediaType.APPLICATION_JSON)
+			.content(body)
+			.header("X-Request-Id", requestId));
 	}
 
 	private ResultActions perform(MockHttpServletRequestBuilder request) throws Exception {

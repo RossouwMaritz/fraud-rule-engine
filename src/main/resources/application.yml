@@ -51,6 +51,11 @@ fraud:
       score: 20
       categories: [GAMBLING, CRYPTO, MONEY_TRANSFER]
 
+logging:
+  structured:
+    format:
+      console: ecs # JSON, and each request's lines carry its requestId
+
 management:
   endpoints:
     web:
