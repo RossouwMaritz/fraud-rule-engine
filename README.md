@@ -182,16 +182,16 @@ docker run --rm --network fraud-rule-engine_default -v "$PWD/loadtest:/scripts" 
 docker compose down -v   # afterwards: each run stores ~100k transactions and floods GET /flags
 ```
 
-It runs two scenarios, one after the other, each with 50 virtual users posting as fast as they can for 30 seconds. "Many customers" uses a new customer for every request. "One customer" sends every request for the same customer. Results, from the second run on a fresh database (the first run warms up the JVM). The one-customer numbers moved by about a quarter between runs, so the table gives the range over three warm runs:
+It runs two scenarios, one after the other, each with 50 virtual users posting as fast as they can for 30 seconds. "Many customers" uses a new customer for every request. "One customer" sends every request for the same customer. The table gives the range over 4 runs. Each run came after one warm-up run on a fresh stack, with the tables emptied between runs. The one-customer numbers swing by 2× from run to run, so take them as a range, not a figure:
 
 | Scenario | Requests per second | p50 | p99 | Errors |
 | --- | --- | --- | --- | --- |
-| Many customers | about 3,400 | 13 ms | 36 ms | 0 |
-| One customer | 170 to 230 | 185 to 250 ms | 670 to 880 ms | 0 |
+| Many customers | 4,800 to 5,200 | 9 to 10 ms | 21 to 25 ms | 0 |
+| One customer | 160 to 350 | 140 to 300 ms | 350 to 850 ms | 0 |
 
-Machine: an Apple M3 Max laptop, with the app, Postgres and k6 all in one Rancher Desktop VM (14 CPUs, 8 GB). Nothing was tuned. A real deployment, with Postgres on its own host, will give different numbers. k6 prints each scenario's rate over the whole 65-second run, so the table divides its request count by 30 seconds instead.
+Machine: an Apple M3 Max laptop, with the app, Postgres and k6 all in one Rancher Desktop VM (14 CPUs, 8 GB). The laptop was busy with other work too (load average 7 to 14). Nothing was tuned. A real deployment, with Postgres on its own host, will give different numbers. k6 prints each scenario's rate over the whole 65-second run, so the table divides its request count by 30 seconds instead.
 
-**One customer's events run one at a time.** This is on purpose: the advisory lock makes the `VELOCITY` count exact. 50 requests for one customer queue on that one lock, so each waits for the ones ahead of it. That's where the 200 ms or so comes from. Each request also gets slower as the customer's history grows, because the history rules load every event in the window around it, and this test puts thousands of events in 10 minutes. A real card doesn't come close to 170 events a second.
+**One customer's events run one at a time.** This is on purpose: the advisory lock makes the `VELOCITY` count exact. 50 requests for one customer queue on that one lock, so each waits for the ones ahead of it. That's where the 140 to 300 ms comes from. Each request also gets slower as the card's history grows, because the history rules load every event in the window around it, and this test puts thousands of events on one card in 10 minutes. A real card doesn't come close to 160 events a second.
 
 ## Design decisions
 
