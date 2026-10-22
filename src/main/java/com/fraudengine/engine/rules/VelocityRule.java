@@ -37,14 +37,22 @@ public class VelocityRule implements FraudRule {
 		// window that contains this event, which may start before it or end after it. Both window ends count.
 		var times = Stream
 			.concat(history.recentTransactions().stream().map(TransactionEvent::occurredAt), Stream.of(at))
+			.sorted()
 			.toList();
-		// shortcut: O(n²) over the events within one window of this one; fine for tens, sort and slide two pointers
-		// if one card can have thousands.
-		long count = times.stream()
-			.filter(start -> !start.isBefore(at.minus(window)) && !start.isAfter(at))
-			.mapToLong(start -> times.stream().filter(t -> !t.isBefore(start) && !t.isAfter(start.plus(window))).count())
-			.max()
-			.orElseThrow();
+		// Every window that holds this event starts at an event in [at - window, at]. With the times sorted, the
+		// window's end index only moves forward, so one pass counts them all.
+		long count = 0;
+		for (int start = 0, end = 0; start < times.size(); start++) {
+			var from = times.get(start);
+			if (from.isBefore(at.minus(window)) || from.isAfter(at)) {
+				continue;
+			}
+			end = Math.max(end, start);
+			while (end < times.size() && !times.get(end).isAfter(from.plus(window))) {
+				end++;
+			}
+			count = Math.max(count, end - start);
+		}
 		if (count <= config.maxCount()) {
 			return Optional.empty();
 		}

@@ -59,6 +59,15 @@ class VelocityRuleTest {
 		assertThat(hitsInArrivalOrder(burst.reversed())).isEqualTo(2);
 	}
 
+	// Equal times all fall in the window that starts at them, so 5 stored at this event's instant make 6.
+	@Test
+	void eventsAtTheSameInstantAllCount() {
+		var sameTime = IntStream.range(0, 5).mapToObj(i -> event(Channel.ONLINE, "ZA", NOW)).toList();
+
+		assertThat(rule.evaluate(event(Channel.ONLINE, "ZA", NOW), history(sameTime)))
+			.isEqualTo(hit("6 transactions in 10 minutes (limit 5)"));
+	}
+
 	/** Each event sees the ones that arrived before it, as stored history does. */
 	private long hitsInArrivalOrder(List<TransactionEvent> events) {
 		return IntStream.range(0, events.size())
