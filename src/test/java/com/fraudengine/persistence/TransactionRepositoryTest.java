@@ -7,6 +7,7 @@ import com.fraudengine.TestcontainersConfiguration;
 import com.fraudengine.engine.AmountStats;
 import com.fraudengine.engine.Channel;
 import com.fraudengine.engine.Decision;
+import org.hibernate.exception.ConstraintViolationException;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
@@ -60,7 +61,11 @@ class TransactionRepositoryTest {
 		saveAll(txn("txn_1", "cus_1", 100, Channel.ONLINE, "ZA", T0));
 
 		assertThatThrownBy(() -> repository.saveAndFlush(txn("txn_1", "cus_1", 999, Channel.ONLINE, "GB", T0)))
-			.isInstanceOf(DataIntegrityViolationException.class);
+			.isInstanceOf(DataIntegrityViolationException.class)
+			// ApiExceptionHandler reads this name to decide between 409 and 500.
+			.cause()
+			.isInstanceOfSatisfying(ConstraintViolationException.class,
+					cause -> assertThat(cause.getConstraintName()).isEqualTo("transactions_pkey"));
 	}
 
 	@Test

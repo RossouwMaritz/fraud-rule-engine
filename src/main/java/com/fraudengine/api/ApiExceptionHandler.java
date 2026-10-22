@@ -1,6 +1,7 @@
 package com.fraudengine.api;
 
 import com.fraudengine.service.TransactionConflictException;
+import org.hibernate.exception.ConstraintViolationException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -49,11 +50,21 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
 		return handleExceptionInternal(ex, ex.getBody(), headers, status, request);
 	}
 
-	// A stored ID with different details, or two customers racing to insert the same ID.
-	@ExceptionHandler({ TransactionConflictException.class, DataIntegrityViolationException.class })
+	// A stored ID with different details.
+	@ExceptionHandler(TransactionConflictException.class)
 	ProblemDetail conflict() {
 		return ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT,
 				"This transaction ID is already stored with different details");
+	}
+
+	// Two customers racing to insert the same ID hit the primary key. Any other constraint is our bug.
+	@ExceptionHandler(DataIntegrityViolationException.class)
+	ProblemDetail integrityViolation(DataIntegrityViolationException ex) {
+		if (ex.getCause() instanceof ConstraintViolationException cause
+				&& "transactions_pkey".equals(cause.getConstraintName())) {
+			return conflict();
+		}
+		return unexpected(ex);
 	}
 
 	@ExceptionHandler(Exception.class)
