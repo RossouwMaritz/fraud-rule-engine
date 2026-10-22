@@ -18,7 +18,7 @@ docker compose up --build -d --wait   # returns once the app is healthy
 
 `send.sh` posts the 21 events in `samples/transactions.json` in order. It prints each decision and the rules that fired. If every decision matches the expected one, it exits with `0`. If any doesn't, it exits with `1`. The API key, `local-dev-key`, comes from `.env`. It moves every `occurredAt` so the last event lands at midnight (UTC) today, keeping the gaps between events, because the app rejects events more than 45 days old. Running it again the same day replays the stored results. On a later day, start from an empty database first: `docker compose down -v`.
 
-To score one transaction yourself, run the command below. Amounts are in minor units (cents for ZAR), so `6000000` is R60,000.00.
+To score one transaction yourself, run the command below. Amounts are in minor units (cents for ZAR), so `6000000` is R60,000.00. `occurredAt` must be in the last 45 days, so move it to a recent time if this one has aged out.
 
 ```bash
 curl -i http://localhost:8080/api/v1/transactions \
@@ -79,7 +79,7 @@ Rules never touch the database, so each one is a plain unit test.
 | `COUNTRY_HOP` | A card-present transaction in a different country from the same card's nearest card-present one before or after it, less than 2 hours apart. Online transactions never fire it | 80 |
 | `HIGH_RISK_CATEGORY` | The merchant category is `GAMBLING`, `CRYPTO` or `MONEY_TRANSFER` | 20 |
 
-**Decision.** The scores of all hits are added up. Under 40 is `CLEAN`, 40 to 79 is `REVIEW`, and 80 or more is `HIGH_RISK`. If a rule throws, it is logged and listed in `rulesErrored`, and the other rules still count.
+**Decision.** The scores of all hits are added up. Under 40 is `CLEAN`, 40 to 79 is `REVIEW`, and 80 or more is `HIGH_RISK`. If a rule throws, it is logged and listed in `rulesErrored`, and the other rules still count. An event more than 45 days old is rejected with a `400` before any rule runs.
 
 **Repeat payments.** Building the scenarios test showed that monthly rent got flagged. One large payment among many small ones always looks unusual. So `AMOUNT_ANOMALY` skips a payment with the same merchant, amount and currency as one 25 to 35 days earlier (35 covers a 31-day month). Without this check, the rent case in the scenarios test comes out `REVIEW`. The 25-day minimum means a fraudster can't clear a flagged amount by just paying it again straight away. And only a `CLEAN` earlier payment counts, so a flagged amount is still flagged a month later. The cost: a new recurring payment that was flagged the first time stays flagged every month, until an analyst workflow can mark it as fine.
 
@@ -137,7 +137,9 @@ Errors use the standard JSON error format (RFC 9457), with `title`, `status` and
 
 Amounts are whole minor units (`125000` is R1,250.00), `currency` must be a real ISO 4217 code (`QQQ` gets a `400`), and `occurredAt` may be at most 5 minutes in the future and at most 45 days in the past (`fraud.max-event-age`). An older event gets a `400` on `occurredAt`.
 
-Swagger UI is at <http://localhost:8080/swagger-ui.html>. Click **Authorize** and enter the key to try calls. Health is at `/actuator/health` and needs no key. Prometheus metrics are at `/actuator/prometheus` and need the key.
+Every response carries an `X-Request-Id` header. A caller's own ID is kept if it is 1 to 64 characters of `A-Z a-z 0-9 . _ -`, otherwise the app makes one. Logs are JSON (Elastic Common Schema), and every line from a request carries its `requestId`, so one request can be followed through the logs.
+
+Swagger UI is at <http://localhost:8080/swagger-ui.html>. Click **Authorize** and enter the key to try calls. In production, turn the docs off with `springdoc.api-docs.enabled=false` and `springdoc.swagger-ui.enabled=false`. Health is at `/actuator/health` and needs no key. Prometheus metrics are at `/actuator/prometheus` and need the key.
 
 ## Testing
 
@@ -145,7 +147,7 @@ Tests need JDK 25 (check with `java -version`), or set `JAVA_HOME` to point at i
 
 ```bash
 ./mvnw test     # unit and Spring tests
-./mvnw verify   # the above, plus the FraudScenariosIT integration test
+./mvnw verify   # the above, plus the FraudScenariosIT and RuleConfigVersionIT integration tests
 ```
 
 The rule and engine tests are plain unit tests. The Spring tests start a throwaway Postgres 17 in Docker (using Testcontainers), so Docker must be running for both commands. To run only the tests that don't need Docker: `./mvnw test -Dtest='RuleEngineTest,FraudRulesPropertiesTest,*RuleTest'`.
@@ -160,6 +162,7 @@ The rule and engine tests are plain unit tests. The Spring tests start a throwaw
 | Card-present in GB, then a late card-present in ZA from 30 minutes before it | `COUNTRY_HOP` on the ZA one | `HIGH_RISK` |
 | R60,000 at a gambling merchant | `HIGH_AMOUNT`, `HIGH_RISK_CATEGORY` | `REVIEW` |
 | A spike against a steady history of 15 payments of R300 to R600 | `AMOUNT_ANOMALY` | `REVIEW` |
+| That flagged spike paid again to the same merchant 30 days later | `AMOUNT_ANOMALY` (a flagged payment doesn't count as a repeat) | `REVIEW` |
 | Monthly rent across a 31-day month | none | `CLEAN` |
 | A normal grocery shop | none | `CLEAN` |
 | One customer's 2 cards, 4 charges each in 10 minutes, then 3 more on one card | `VELOCITY` on that card's 6th and 7th | `REVIEW` (the first 9 are `CLEAN`) |
@@ -197,7 +200,14 @@ Machine: an Apple M3 Max laptop, with the app, Postgres and k6 all in one Ranche
 - **Event time, both ways.** Real feeds retry, batch and reorder events. So the history rules look at what happened on both sides of an event's `occurredAt`, not only at what arrived before it. A late event gets the flag itself. Decisions already stored are never changed, so an auditor always sees what the engine said at the time. Events more than 45 days old are rejected rather than scored, so a bad timestamp (from 1999, say) can't slip through.
 - **Amounts in minor units.** Amounts are a `long` count of minor units (cents for ZAR), never `double`, so there is no rounding error. The database column is `bigint` with a `> 0` check.
 - **Config in YAML.** Rules are code and thresholds are config. Keeping the config in `application.yml` means it is versioned and reviewed with the code, validated at startup, and readable at `GET /api/v1/rules`. Each decision records which version of it was used. Changing it needs a restart. That's a fair trade for a first version (see "What I'd add next").
+- **A config version on every decision.** Thresholds change over time, and an auditor needs the ones that were live when a decision was made, not today's. So each decision stores a short hash of the config, and `rule_configs` keeps every config by its hash (see [Config versions](#rules)). A hash needs no one to remember to bump a version number.
 - **Idempotency.** The transaction ID is the primary key. A repeat of a stored ID with the same details returns the stored result with `200` and is not evaluated again, so a retry can't double-count itself in `VELOCITY`. A repeat with different details gets `409`.
+
+## Data and privacy
+
+Each transaction stores its IDs (transaction, customer, card, merchant), amount and currency, merchant category, channel, merchant country, the time it happened and arrived, and the decision with its rule hits. There are no card numbers, names, addresses or contact details. `cardId` must be a token, never the card number (see [API](#api)). The `Evaluated` log line at `INFO` carries IDs, the decision, the score and the rules, never amounts.
+
+There is no retention policy yet, and nothing deletes old rows. That's a decision for the bank. A starting point would be 13 months, to cover card dispute windows, after which rows are deleted or anonymised.
 
 ## What I'd add next
 
