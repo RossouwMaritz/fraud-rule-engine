@@ -1,5 +1,7 @@
 # Fraud Rule Engine
 
+[![CI](https://github.com/RossouwMaritz/fraud-rule-engine/actions/workflows/ci.yml/badge.svg)](https://github.com/RossouwMaritz/fraud-rule-engine/actions/workflows/ci.yml)
+
 ## What it is
 
 A Spring Boot service that takes card transaction events, runs each one through a set of configurable fraud rules, and stores the decision with a readable reason for every rule that fired. It **flags** transactions for review and never blocks them.
