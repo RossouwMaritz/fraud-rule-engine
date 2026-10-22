@@ -40,6 +40,8 @@ public class TransactionEntity implements Persistable<String> {
 
 	private String customerId;
 
+	private String cardId;
+
 	private long amountMinor;
 
 	@JdbcTypeCode(SqlTypes.CHAR)
@@ -84,11 +86,12 @@ public class TransactionEntity implements Persistable<String> {
 	protected TransactionEntity() {
 	}
 
-	public TransactionEntity(String transactionId, String customerId, long amountMinor, String currency,
-			String merchantId, String merchantCategory, Channel channel, String merchantCountry, Instant occurredAt,
-			int totalScore, Decision decision, List<String> rulesErrored, String configVersion) {
+	public TransactionEntity(String transactionId, String customerId, String cardId, long amountMinor,
+			String currency, String merchantId, String merchantCategory, Channel channel, String merchantCountry,
+			Instant occurredAt, int totalScore, Decision decision, List<String> rulesErrored, String configVersion) {
 		this.transactionId = transactionId;
 		this.customerId = customerId;
+		this.cardId = cardId;
 		this.amountMinor = amountMinor;
 		this.currency = currency;
 		this.merchantId = merchantId;
@@ -103,9 +106,10 @@ public class TransactionEntity implements Persistable<String> {
 	}
 
 	public static TransactionEntity of(TransactionEvent txn, Evaluation evaluation, String configVersion) {
-		var entity = new TransactionEntity(txn.transactionId(), txn.customerId(), txn.amountMinor(), txn.currency(),
-				txn.merchantId(), txn.merchantCategory(), txn.channel(), txn.merchantCountry(), txn.occurredAt(),
-				evaluation.totalScore(), evaluation.decision(), evaluation.rulesErrored(), configVersion);
+		var entity = new TransactionEntity(txn.transactionId(), txn.customerId(), txn.cardId(), txn.amountMinor(),
+				txn.currency(), txn.merchantId(), txn.merchantCategory(), txn.channel(), txn.merchantCountry(),
+				txn.occurredAt(), evaluation.totalScore(), evaluation.decision(), evaluation.rulesErrored(),
+				configVersion);
 		evaluation.hits().forEach(hit -> entity.addHit(new RuleHitEntity(hit.ruleId(), hit.score(), hit.reason())));
 		return entity;
 	}
@@ -116,8 +120,8 @@ public class TransactionEntity implements Persistable<String> {
 	}
 
 	public TransactionEvent toEvent() {
-		return new TransactionEvent(transactionId, customerId, amountMinor, currency, merchantId, merchantCategory,
-				channel, merchantCountry, occurredAt);
+		return new TransactionEvent(transactionId, customerId, cardId, amountMinor, currency, merchantId,
+				merchantCategory, channel, merchantCountry, occurredAt);
 	}
 
 	public Evaluation toEvaluation() {
@@ -148,6 +152,10 @@ public class TransactionEntity implements Persistable<String> {
 
 	public String getCustomerId() {
 		return customerId;
+	}
+
+	public String getCardId() {
+		return cardId;
 	}
 
 	public long getAmountMinor() {

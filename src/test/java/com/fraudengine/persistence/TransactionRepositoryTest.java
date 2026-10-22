@@ -34,8 +34,8 @@ class TransactionRepositoryTest {
 
 	@Test
 	void savesTransactionWithHitsAndReadsItBack() {
-		var txn = new TransactionEntity("txn_1", "cus_1", 6_000_000, "ZAR", "mer_1", "GAMBLING", Channel.CARD_PRESENT,
-				"ZA", T0, 60, Decision.REVIEW, List.of("VELOCITY"), "unknown");
+		var txn = new TransactionEntity("txn_1", "cus_1", "card_1", 6_000_000, "ZAR", "mer_1", "GAMBLING",
+				Channel.CARD_PRESENT, "ZA", T0, 60, Decision.REVIEW, List.of("VELOCITY"), "unknown");
 		txn.addHit(new RuleHitEntity("HIGH_AMOUNT", 40, "R60000.00 is over the R50000.00 limit"));
 		txn.addHit(new RuleHitEntity("HIGH_RISK_CATEGORY", 20, "GAMBLING is a high-risk category"));
 		repository.save(txn);
@@ -79,9 +79,9 @@ class TransactionRepositoryTest {
 				txn("e", "cus_1", 9_999, Channel.ONLINE, "ZA", T0),
 				txn("f", "cus_1", 9_999, Channel.ONLINE, "ZA", T0.minusSeconds(9000)),
 				txn("g", "cus_2", 9_999, Channel.ONLINE, "ZA", T0.minusSeconds(1000)),
-				new TransactionEntity("h", "cus_1", 9_999, "ZAR", "mer_1", "GAMBLING", Channel.ONLINE, "ZA",
+				new TransactionEntity("h", "cus_1", "card_1", 9_999, "ZAR", "mer_1", "GAMBLING", Channel.ONLINE, "ZA",
 						T0.minusSeconds(1000), 50, Decision.REVIEW, List.of(), "unknown"),
-				new TransactionEntity("i", "cus_1", 9_999, "USD", "mer_1", "GAMBLING", Channel.ONLINE, "ZA",
+				new TransactionEntity("i", "cus_1", "card_1", 9_999, "USD", "mer_1", "GAMBLING", Channel.ONLINE, "ZA",
 						T0.minusSeconds(1000), 0, Decision.CLEAN, List.of(), "unknown"));
 
 		var stats = repository.amountStats("cus_1", "ZAR", T0.minusSeconds(5000), T0);
@@ -102,9 +102,10 @@ class TransactionRepositoryTest {
 				txn("from", "cus_1", 100, Channel.ONLINE, "ZA", T0.minusSeconds(600)),
 				txn("mid", "cus_1", 100, Channel.ONLINE, "ZA", T0.minusSeconds(300)),
 				txn("to", "cus_1", 100, Channel.ONLINE, "ZA", T0),
-				txn("other", "cus_2", 100, Channel.ONLINE, "ZA", T0));
+				txn("other", "cus_2", 100, Channel.ONLINE, "ZA", T0),
+				onCard("card_2", "other_card", "cus_1", 100, Channel.ONLINE, "ZA", T0));
 
-		assertThat(repository.findRecent("cus_1", T0.minusSeconds(600), T0))
+		assertThat(repository.findRecent("cus_1", "card_1", T0.minusSeconds(600), T0))
 			.extracting(TransactionEntity::getTransactionId)
 			.containsExactly("to", "mid", "from");
 	}
@@ -115,13 +116,16 @@ class TransactionRepositoryTest {
 				txn("cp_prev", "cus_1", 100, Channel.CARD_PRESENT, "GB", T0.minusSeconds(2000)),
 				txn("online", "cus_1", 100, Channel.ONLINE, "US", T0.minusSeconds(1000)),
 				txn("cp_same_time", "cus_1", 100, Channel.CARD_PRESENT, "FR", T0),
-				txn("cp_later", "cus_1", 100, Channel.CARD_PRESENT, "DE", T0.plusSeconds(1)));
+				txn("cp_later", "cus_1", 100, Channel.CARD_PRESENT, "DE", T0.plusSeconds(1)),
+				txn("other", "cus_2", 100, Channel.CARD_PRESENT, "NL", T0),
+				onCard("card_2", "other_card", "cus_1", 100, Channel.CARD_PRESENT, "NL", T0));
 
-		assertThat(repository.findPreviousCardPresent("cus_1", T0)).map(TransactionEntity::getTransactionId)
+		assertThat(repository.findPreviousCardPresent("cus_1", "card_1", T0)).map(TransactionEntity::getTransactionId)
 			.contains("cp_same_time");
-		assertThat(repository.findPreviousCardPresent("cus_1", T0.minusSeconds(1))).map(TransactionEntity::getTransactionId)
+		assertThat(repository.findPreviousCardPresent("cus_1", "card_1", T0.minusSeconds(1)))
+			.map(TransactionEntity::getTransactionId)
 			.contains("cp_prev");
-		assertThat(repository.findPreviousCardPresent("cus_1", T0.minusSeconds(3001))).isEmpty();
+		assertThat(repository.findPreviousCardPresent("cus_1", "card_1", T0.minusSeconds(3001))).isEmpty();
 	}
 
 	@Test
@@ -131,11 +135,12 @@ class TransactionRepositoryTest {
 				txn("online", "cus_1", 100, Channel.ONLINE, "US", T0.plusSeconds(1000)),
 				txn("cp_next", "cus_1", 100, Channel.CARD_PRESENT, "GB", T0.plusSeconds(2000)),
 				txn("cp_later", "cus_1", 100, Channel.CARD_PRESENT, "DE", T0.plusSeconds(3000)),
-				txn("other", "cus_2", 100, Channel.CARD_PRESENT, "NL", T0.plusSeconds(1)));
+				txn("other", "cus_2", 100, Channel.CARD_PRESENT, "NL", T0.plusSeconds(1)),
+				onCard("card_2", "other_card", "cus_1", 100, Channel.CARD_PRESENT, "NL", T0.plusSeconds(1)));
 
-		assertThat(repository.findNextCardPresent("cus_1", T0)).map(TransactionEntity::getTransactionId)
+		assertThat(repository.findNextCardPresent("cus_1", "card_1", T0)).map(TransactionEntity::getTransactionId)
 			.contains("cp_next");
-		assertThat(repository.findNextCardPresent("cus_1", T0.plusSeconds(3000))).isEmpty();
+		assertThat(repository.findNextCardPresent("cus_1", "card_1", T0.plusSeconds(3000))).isEmpty();
 	}
 
 	private void saveAll(TransactionEntity... txns) {
@@ -144,9 +149,15 @@ class TransactionRepositoryTest {
 		em.clear();
 	}
 
+	/** On card_1 whatever the customer, so a cus_2 row also checks that the card queries match the customer. */
 	private static TransactionEntity txn(String id, String customerId, long amountMinor, Channel channel,
 			String country, Instant occurredAt) {
-		return new TransactionEntity(id, customerId, amountMinor, "ZAR", "mer_1", "GAMBLING", channel, country,
+		return onCard("card_1", id, customerId, amountMinor, channel, country, occurredAt);
+	}
+
+	private static TransactionEntity onCard(String cardId, String id, String customerId, long amountMinor,
+			Channel channel, String country, Instant occurredAt) {
+		return new TransactionEntity(id, customerId, cardId, amountMinor, "ZAR", "mer_1", "GAMBLING", channel, country,
 				occurredAt, 0, Decision.CLEAN, List.of(), "unknown");
 	}
 

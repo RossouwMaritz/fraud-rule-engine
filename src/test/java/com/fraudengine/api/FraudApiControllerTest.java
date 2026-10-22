@@ -74,12 +74,13 @@ class FraudApiControllerTest {
 	@Test
 	void invalidRequestIs400WithTheFieldNames() throws Exception {
 		var body = json("t".repeat(65), "cus_api_bad", 0, "GROCERIES", "CARD_PRESENT", "za", Instant.now().plus(Duration.ofMinutes(6)))
-			.replace("\"ZAR\"", "\"zar\"");
+			.replace("\"ZAR\"", "\"zar\"")
+			.replace("\"card_1\"", "\"card 1\"");
 
 		postTransaction(body).andExpect(status().isBadRequest())
 			.andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON))
-			.andExpect(jsonPath("$.errors[*].field").value(
-					containsInAnyOrder("transactionId", "amountMinor", "currency", "merchantCountry", "occurredAt")));
+			.andExpect(jsonPath("$.errors[*].field").value(containsInAnyOrder("transactionId", "cardId", "amountMinor",
+					"currency", "merchantCountry", "occurredAt")));
 	}
 
 	@Test
@@ -243,7 +244,7 @@ class FraudApiControllerTest {
 	private static String json(String id, String customerId, long amountMinor, String category, String channel,
 			String country, Instant occurredAt) {
 		return """
-				{"transactionId": "%s", "customerId": "%s", "amountMinor": %d, "currency": "ZAR",
+				{"transactionId": "%s", "customerId": "%s", "cardId": "card_1", "amountMinor": %d, "currency": "ZAR",
 				 "merchantId": "mer_1", "merchantCategory": "%s", "channel": "%s", "merchantCountry": "%s",
 				 "occurredAt": "%s"}""".formatted(id, customerId, amountMinor, category, channel, country, occurredAt);
 	}

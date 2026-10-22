@@ -15,8 +15,8 @@ class RuleEngineTest {
 	private static final FraudRulesProperties PROPERTIES = new FraudRulesProperties(
 			new FraudRulesProperties.Bands(40, 80), null, null);
 
-	private static final TransactionEvent TXN = new TransactionEvent("txn_1", "cus_1", 125_000, "ZAR", "mer_1",
-			"GROCERIES", Channel.CARD_PRESENT, "ZA", Instant.parse("2026-10-19T10:00:00Z"));
+	private static final TransactionEvent TXN = new TransactionEvent("txn_1", "cus_1", "card_1", 125_000, "ZAR",
+			"mer_1", "GROCERIES", Channel.CARD_PRESENT, "ZA", Instant.parse("2026-10-19T10:00:00Z"));
 
 	private static final CustomerHistory NO_HISTORY = new CustomerHistory(List.of(), Optional.empty(), Optional.empty(),
 			new AmountStats(0, 0, 0), false);

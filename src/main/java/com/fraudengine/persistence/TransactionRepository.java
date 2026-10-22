@@ -16,33 +16,35 @@ public interface TransactionRepository
 	@Query(value = "select 1 from pg_advisory_xact_lock(hashtext(:customerId))", nativeQuery = true)
 	int lockCustomer(String customerId);
 
-	/** The customer's transactions with {@code from <= occurredAt <= to}, newest first. */
+	// The card queries also match the customer, so a card ID sent for two customers can't escape the customer lock.
+
+	/** The card's transactions with {@code from <= occurredAt <= to}, newest first. */
 	@Query("""
 			select t from TransactionEntity t
-			where t.customerId = :customerId and t.occurredAt between :from and :to
+			where t.customerId = :customerId and t.cardId = :cardId and t.occurredAt between :from and :to
 			order by t.occurredAt desc""")
-	List<TransactionEntity> findRecent(String customerId, Instant from, Instant to);
+	List<TransactionEntity> findRecent(String customerId, String cardId, Instant from, Instant to);
 
 	/**
-	 * The customer's latest card-present transaction at or before {@code upTo}. Equal times count, so two cards used
-	 * at the same moment in different countries are caught. Call it before saving the current transaction.
+	 * The card's latest card-present transaction at or before {@code upTo}. Equal times count, so a cloned card used
+	 * at the same moment in two countries is caught. Call it before saving the current transaction.
 	 */
 	@Query("""
 			select t from TransactionEntity t
-			where t.customerId = :customerId and t.channel = com.fraudengine.engine.Channel.CARD_PRESENT
-			  and t.occurredAt <= :upTo
+			where t.customerId = :customerId and t.cardId = :cardId
+			  and t.channel = com.fraudengine.engine.Channel.CARD_PRESENT and t.occurredAt <= :upTo
 			order by t.occurredAt desc
 			limit 1""")
-	Optional<TransactionEntity> findPreviousCardPresent(String customerId, Instant upTo);
+	Optional<TransactionEntity> findPreviousCardPresent(String customerId, String cardId, Instant upTo);
 
-	/** The customer's earliest card-present transaction strictly after {@code after}, for events that arrive late. */
+	/** The card's earliest card-present transaction strictly after {@code after}, for events that arrive late. */
 	@Query("""
 			select t from TransactionEntity t
-			where t.customerId = :customerId and t.channel = com.fraudengine.engine.Channel.CARD_PRESENT
-			  and t.occurredAt > :after
+			where t.customerId = :customerId and t.cardId = :cardId
+			  and t.channel = com.fraudengine.engine.Channel.CARD_PRESENT and t.occurredAt > :after
 			order by t.occurredAt
 			limit 1""")
-	Optional<TransactionEntity> findNextCardPresent(String customerId, Instant after);
+	Optional<TransactionEntity> findNextCardPresent(String customerId, String cardId, Instant after);
 
 	/**
 	 * Whether the customer made a {@code CLEAN} payment to this merchant of this exact amount with

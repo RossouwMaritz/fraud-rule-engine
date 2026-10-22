@@ -39,7 +39,7 @@ public class VelocityRule implements FraudRule {
 			.concat(history.recentTransactions().stream().map(TransactionEvent::occurredAt), Stream.of(at))
 			.toList();
 		// shortcut: O(n²) over the events within one window of this one; fine for tens, sort and slide two pointers
-		// if one customer can have thousands.
+		// if one card can have thousands.
 		long count = times.stream()
 			.filter(start -> !start.isBefore(at.minus(window)) && !start.isAfter(at))
 			.mapToLong(start -> times.stream().filter(t -> !t.isBefore(start) && !t.isAfter(start.plus(window))).count())

@@ -61,9 +61,9 @@ public class EvaluationService {
 			var stored = repository.findById(txn.transactionId());
 			if (stored.isPresent()) {
 				// Postgres keeps microseconds and the driver rounds half up, so round the same way before comparing.
-				var sameEvent = new TransactionEvent(txn.transactionId(), txn.customerId(), txn.amountMinor(),
-						txn.currency(), txn.merchantId(), txn.merchantCategory(), txn.channel(), txn.merchantCountry(),
-						txn.occurredAt().plusNanos(500).truncatedTo(ChronoUnit.MICROS));
+				var sameEvent = new TransactionEvent(txn.transactionId(), txn.customerId(), txn.cardId(),
+						txn.amountMinor(), txn.currency(), txn.merchantId(), txn.merchantCategory(), txn.channel(),
+						txn.merchantCountry(), txn.occurredAt().plusNanos(500).truncatedTo(ChronoUnit.MICROS));
 				if (!stored.get().toEvent().equals(sameEvent)) {
 					throw new TransactionConflictException(txn.transactionId());
 				}
@@ -77,12 +77,14 @@ public class EvaluationService {
 			// Load history before saving, so it never holds this transaction.
 			var at = txn.occurredAt();
 			var history = new CustomerHistory(
-					repository.findRecent(txn.customerId(), at.minus(recentWindow), at.plus(recentWindow))
+					repository
+						.findRecent(txn.customerId(), txn.cardId(), at.minus(recentWindow), at.plus(recentWindow))
 						.stream()
 						.map(TransactionEntity::toEvent)
 						.toList(),
-					repository.findPreviousCardPresent(txn.customerId(), at).map(TransactionEntity::toEvent),
-					repository.findNextCardPresent(txn.customerId(), at).map(TransactionEntity::toEvent),
+					repository.findPreviousCardPresent(txn.customerId(), txn.cardId(), at)
+						.map(TransactionEntity::toEvent),
+					repository.findNextCardPresent(txn.customerId(), txn.cardId(), at).map(TransactionEntity::toEvent),
 					repository.amountStats(txn.customerId(), txn.currency(), at.minus(amountLookback), at),
 					repository.existsRepeatPayment(txn.customerId(), txn.merchantId(), txn.amountMinor(),
 							txn.currency(), at.minus(repeatMaxAge), at.minus(repeatMinAge)));

@@ -33,6 +33,7 @@ export default function () {
     const res = http.post(url, JSON.stringify({
         transactionId: id,
         customerId: busy ? `cus_lt_${run}_busy` : `cus_${id}`,
+        cardId: busy ? `card_lt_${run}_busy` : `card_${id}`,
         amountMinor: 10000 + (__ITER % 500) * 100,
         currency: 'ZAR',
         merchantId: 'mer_loadtest',

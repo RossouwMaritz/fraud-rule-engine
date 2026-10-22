@@ -39,12 +39,12 @@ final class TestEvents {
 	}
 
 	static TransactionEvent event(long amountMinor, String currency, String category) {
-		return new TransactionEvent("txn_1", "cus_1", amountMinor, currency, "mer_1", category, Channel.CARD_PRESENT,
-				"ZA", NOW);
+		return new TransactionEvent("txn_1", "cus_1", "card_1", amountMinor, currency, "mer_1", category,
+				Channel.CARD_PRESENT, "ZA", NOW);
 	}
 
 	static TransactionEvent event(Channel channel, String country, Instant occurredAt) {
-		return new TransactionEvent("txn_" + occurredAt.getEpochSecond(), "cus_1", 10_000, "ZAR", "mer_1",
+		return new TransactionEvent("txn_" + occurredAt.getEpochSecond(), "cus_1", "card_1", 10_000, "ZAR", "mer_1",
 				"GROCERIES", channel, country, occurredAt);
 	}
 

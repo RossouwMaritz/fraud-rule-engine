@@ -69,6 +69,24 @@ class FraudScenariosIT {
 		}
 	}
 
+	// A family on one account: 2 cards, 4 charges each in 10 minutes, is not a burst. 3 more on one card then is.
+	@Test
+	void velocityCountsEachCardOnItsOwn() throws Exception {
+		var cardA = new Customer("cus_sc_family", "card_sc_family_a");
+		var cardB = new Customer("cus_sc_family", "card_sc_family_b");
+		var start = Instant.parse("2026-10-01T09:00:00Z");
+		for (int i = 0; i < 8; i++) {
+			var card = i % 2 == 0 ? cardA : cardB;
+			card.pay(500 + 100L * (i % 3), "mer_webshop", "DIGITAL_GOODS", "ONLINE", "ZA", start.plusSeconds(60L * i))
+				.expect(CLEAN);
+		}
+		cardA.pay(600, "mer_webshop", "DIGITAL_GOODS", "ONLINE", "ZA", start.plusSeconds(480)).expect(CLEAN);
+		cardA.pay(500, "mer_webshop", "DIGITAL_GOODS", "ONLINE", "ZA", start.plusSeconds(500))
+			.expect(REVIEW, "VELOCITY");
+		cardA.pay(700, "mer_webshop", "DIGITAL_GOODS", "ONLINE", "ZA", start.plusSeconds(520))
+			.expect(REVIEW, "VELOCITY");
+	}
+
 	@Test
 	void lateCardPresentInZaBeforeAStoredGbOneIsHighRisk() throws Exception {
 		var customer = new Customer("cus_sc_hop_late");
@@ -171,10 +189,17 @@ class FraudScenariosIT {
 
 		private final String id;
 
+		private final String cardId;
+
 		private int count;
 
 		Customer(String id) {
+			this(id, id + "_card");
+		}
+
+		Customer(String id, String cardId) {
 			this.id = id;
+			this.cardId = cardId;
 		}
 
 		/** 15 card-present groceries, one a day from {@code start}, every one CLEAN. */
@@ -188,12 +213,13 @@ class FraudScenariosIT {
 
 		Posted pay(long amountMinor, String merchantId, String category, String channel, String country,
 				Instant occurredAt) throws Exception {
-			var transactionId = "txn_" + id + "_" + ++count;
+			// Named after the card, so two cards of one customer never reuse an ID.
+			var transactionId = "txn_" + cardId + "_" + ++count;
 			var body = """
-					{"transactionId": "%s", "customerId": "%s", "amountMinor": %d, "currency": "ZAR",
+					{"transactionId": "%s", "customerId": "%s", "cardId": "%s", "amountMinor": %d, "currency": "ZAR",
 					 "merchantId": "%s", "merchantCategory": "%s", "channel": "%s", "merchantCountry": "%s",
-					 "occurredAt": "%s"}""".formatted(transactionId, id, amountMinor, merchantId, category, channel,
-					country, occurredAt);
+					 "occurredAt": "%s"}""".formatted(transactionId, id, cardId, amountMinor, merchantId, category,
+					channel, country, occurredAt);
 			var response = mvc
 				.perform(post("/api/v1/transactions").header("X-API-Key", apiKey)
 					.contentType(MediaType.APPLICATION_JSON)

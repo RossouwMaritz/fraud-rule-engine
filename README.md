@@ -23,8 +23,8 @@ To score one transaction yourself, run the command below. Amounts are in minor u
 ```bash
 curl -i http://localhost:8080/api/v1/transactions \
   -H 'X-API-Key: local-dev-key' -H 'Content-Type: application/json' \
-  -d '{"transactionId": "txn_readme_01", "customerId": "cus_readme", "amountMinor": 6000000,
-       "currency": "ZAR", "merchantId": "mer_casino", "merchantCategory": "GAMBLING",
+  -d '{"transactionId": "txn_readme_01", "customerId": "cus_readme", "cardId": "card_readme",
+       "amountMinor": 6000000, "currency": "ZAR", "merchantId": "mer_casino", "merchantCategory": "GAMBLING",
        "channel": "ONLINE", "merchantCountry": "ZA", "occurredAt": "2026-10-19T10:00:00Z"}'
 ```
 
@@ -63,7 +63,7 @@ flowchart LR
 2. `FraudApiController` validates the request body.
 3. `EvaluationService` opens one database transaction and locks the customer, so their events are scored one at a time (see [Design decisions](#design-decisions)).
 4. If the transaction ID is already stored, it returns the stored result.
-5. Otherwise it loads the customer's history: their transactions within 10 minutes either side, their nearest card-present transaction before and after this one, and the average and spread of their amounts in the same currency over the 30 days before it.
+5. Otherwise it loads the history: the card's transactions within 10 minutes either side, the card's nearest card-present transaction before and after this one, and the average and spread of the customer's amounts on all their cards, in the same currency, over the 30 days before it.
 6. `RuleEngine` runs every enabled rule, adds up the scores and picks a decision.
 7. The service saves the transaction, the rules that fired and the config version, and commits.
 
@@ -75,8 +75,8 @@ Rules never touch the database, so each one is a plain unit test.
 | --- | --- | --- |
 | `HIGH_AMOUNT` | The amount is over its currency's limit: R50,000, $3,000, €3,000 or £2,500. There's no FX conversion. A currency with no limit configured always fires, so it goes to review instead of slipping through | 40 |
 | `AMOUNT_ANOMALY` | The customer has at least 10 `CLEAN` transactions in this currency in the last 30 days, and this amount is far above their usual spend: more than their average plus 3 standard deviations. Flagged transactions are left out, so fraud can't raise the baseline. A repeat payment never fires (see below) | 50 |
-| `VELOCITY` | More than 5 of the customer's transactions in any 10 minutes that include this one. Stored transactions after it count too, so a burst that arrives out of order is still caught | 40 |
-| `COUNTRY_HOP` | A card-present transaction in a different country from the customer's nearest card-present one before or after it, less than 2 hours apart. Online transactions never fire it | 80 |
+| `VELOCITY` | More than 5 of the card's transactions in any 10 minutes that include this one. Stored transactions after it count too, so a burst that arrives out of order is still caught. Each card counts on its own, so a family sharing an account isn't one burst | 40 |
+| `COUNTRY_HOP` | A card-present transaction in a different country from the same card's nearest card-present one before or after it, less than 2 hours apart. Online transactions never fire it | 80 |
 | `HIGH_RISK_CATEGORY` | The merchant category is `GAMBLING`, `CRYPTO` or `MONEY_TRANSFER` | 20 |
 
 **Decision.** The scores of all hits are added up. Under 40 is `CLEAN`, 40 to 79 is `REVIEW`, and 80 or more is `HIGH_RISK`. If a rule throws, it is logged and listed in `rulesErrored`, and the other rules still count.
@@ -119,6 +119,8 @@ Decisions stored before versions existed point at `unknown`, whose config is `{}
 
 Every `/api/**` call needs the `X-API-Key` header. A missing or wrong key gets `401`.
 
+`cardId` is the issuer's token or reference for the card, never the card number. It is stored and returned as sent.
+
 | Method and path | Response |
 | --- | --- |
 | `POST /api/v1/transactions` | `201` with the evaluation. Sending the same transaction again gets `200` with the stored result, and a reused ID with different details gets `409` (see [Idempotency](#design-decisions)) |
@@ -160,6 +162,7 @@ The rule and engine tests are plain unit tests. The Spring tests start a throwaw
 | A spike against a steady history of 15 payments of R300 to R600 | `AMOUNT_ANOMALY` | `REVIEW` |
 | Monthly rent across a 31-day month | none | `CLEAN` |
 | A normal grocery shop | none | `CLEAN` |
+| One customer's 2 cards, 4 charges each in 10 minutes, then 3 more on one card | `VELOCITY` on that card's 6th and 7th | `REVIEW` (the first 9 are `CLEAN`) |
 | An online US purchase straight after card-present in ZA | none | `CLEAN` |
 | A real trip: card-present in ZA, then GB 11 hours later | none | `CLEAN` |
 
@@ -190,7 +193,7 @@ Machine: an Apple M3 Max laptop, with the app, Postgres and k6 all in one Ranche
 ## Design decisions
 
 - **Synchronous REST, no broker.** The caller gets the decision in the response, and one database transaction both evaluates and stores it. So there is no gap where an event is accepted but not yet scored, and no queue to run. If a caller's network drops, it simply retries, and the retry is safe (see Idempotency below).
-- **An advisory lock per customer.** `VELOCITY` and `COUNTRY_HOP` read the customer's other transactions. If two events for one customer arrived at the same moment, each could miss the other. So each evaluation first takes a Postgres lock keyed on the customer ID (`pg_advisory_xact_lock`). It's a lock on a name, not on a table row, and Postgres releases it when the transaction commits. Events for one customer run one at a time, and different customers still run in parallel. No extra infrastructure is needed.
+- **An advisory lock per customer.** `VELOCITY` and `COUNTRY_HOP` read the card's other transactions, and `AMOUNT_ANOMALY` reads all of the customer's. If two events for one customer arrived at the same moment, each could miss the other. So each evaluation first takes a Postgres lock keyed on the customer ID (`pg_advisory_xact_lock`). It's a lock on a name, not on a table row, and Postgres releases it when the transaction commits. Events for one customer run one at a time, across all their cards, and different customers still run in parallel. No extra infrastructure is needed.
 - **Event time, both ways.** Real feeds retry, batch and reorder events. So the history rules look at what happened on both sides of an event's `occurredAt`, not only at what arrived before it. A late event gets the flag itself. Decisions already stored are never changed, so an auditor always sees what the engine said at the time. Events more than 45 days old are rejected rather than scored, so a bad timestamp (from 1999, say) can't slip through.
 - **Amounts in minor units.** Amounts are a `long` count of minor units (cents for ZAR), never `double`, so there is no rounding error. The database column is `bigint` with a `> 0` check.
 - **Config in YAML.** Rules are code and thresholds are config. Keeping the config in `application.yml` means it is versioned and reviewed with the code, validated at startup, and readable at `GET /api/v1/rules`. Each decision records which version of it was used. Changing it needs a restart. That's a fair trade for a first version (see "What I'd add next").

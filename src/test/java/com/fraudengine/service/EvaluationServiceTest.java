@@ -48,7 +48,7 @@ class EvaluationServiceTest {
 			.containsExactlyInAnyOrder("HIGH_AMOUNT", "HIGH_RISK_CATEGORY");
 		assertThat(second.replay()).isTrue();
 		assertThat(second.evaluation()).isEqualTo(first.evaluation());
-		assertThat(repository.findRecent("cus_replay", T0, T0)).hasSize(1);
+		assertThat(repository.findRecent("cus_replay", "cus_replay_card", T0, T0)).hasSize(1);
 	}
 
 	@Test
@@ -66,7 +66,7 @@ class EvaluationServiceTest {
 
 		assertThatThrownBy(() -> service.evaluate(event("txn_conflict", "cus_b", 6_000_000, "GAMBLING", T0)))
 			.isInstanceOf(TransactionConflictException.class);
-		assertThat(repository.findRecent("cus_b", T0, T0)).isEmpty();
+		assertThat(repository.findRecent("cus_b", "cus_b_card", T0, T0)).isEmpty();
 	}
 
 	@Test
@@ -93,7 +93,7 @@ class EvaluationServiceTest {
 					"7 transactions in 10 minutes (limit 5)", "8 transactions in 10 minutes (limit 5)",
 					"9 transactions in 10 minutes (limit 5)", "10 transactions in 10 minutes (limit 5)");
 		}
-		assertThat(repository.findRecent("cus_par", T0, T0)).hasSize(10);
+		assertThat(repository.findRecent("cus_par", "cus_par_card", T0, T0)).hasSize(10);
 	}
 
 	private static EvaluationResult join(Future<EvaluationResult> future) {
@@ -107,8 +107,8 @@ class EvaluationServiceTest {
 
 	private static TransactionEvent event(String id, String customerId, long amountMinor, String category,
 			Instant occurredAt) {
-		return new TransactionEvent(id, customerId, amountMinor, "ZAR", "mer_1", category, Channel.CARD_PRESENT, "ZA",
-				occurredAt);
+		return new TransactionEvent(id, customerId, customerId + "_card", amountMinor, "ZAR", "mer_1", category,
+				Channel.CARD_PRESENT, "ZA", occurredAt);
 	}
 
 }

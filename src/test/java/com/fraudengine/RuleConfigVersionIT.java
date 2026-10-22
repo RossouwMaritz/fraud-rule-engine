@@ -44,8 +44,8 @@ class RuleConfigVersionIT {
 					"--spring.datasource.password=" + postgres.getPassword(),
 					"--fraud.rules.high-amount.thresholds-minor.ZAR=" + zarLimit)) {
 			return context.getBean(EvaluationService.class)
-				.evaluate(new TransactionEvent(transactionId, "cus_cfg", 10_000, "ZAR", "mer_1", "GROCERIES",
-						Channel.ONLINE, "ZA", Instant.parse("2026-10-19T10:00:00Z")))
+				.evaluate(new TransactionEvent(transactionId, "cus_cfg", "card_cfg", 10_000, "ZAR", "mer_1",
+						"GROCERIES", Channel.ONLINE, "ZA", Instant.parse("2026-10-19T10:00:00Z")))
 				.configVersion();
 		}
 	}

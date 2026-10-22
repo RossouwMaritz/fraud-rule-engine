@@ -14,14 +14,15 @@ import jakarta.validation.constraints.Size;
 /** {@code occurredAt} may be up to 5 minutes ahead, through the validator's temporal tolerance. */
 // The transaction ID goes into URLs (Location, GET by ID), so only URL-safe characters are allowed.
 public record TransactionRequest(@NotBlank @Size(max = 64) @Pattern(regexp = "[A-Za-z0-9_.:-]+") String transactionId,
-		@NotBlank @Size(max = 64) String customerId, @Positive long amountMinor,
+		@NotBlank @Size(max = 64) String customerId,
+		@NotBlank @Size(max = 64) @Pattern(regexp = "[A-Za-z0-9_.:-]+") String cardId, @Positive long amountMinor,
 		@NotNull @Pattern(regexp = "[A-Z]{3}") String currency, @NotBlank @Size(max = 64) String merchantId,
 		@NotBlank @Size(max = 64) String merchantCategory, @NotNull Channel channel,
 		@NotNull @Pattern(regexp = "[A-Z]{2}") String merchantCountry, @NotNull @PastOrPresent Instant occurredAt) {
 
 	TransactionEvent toEvent() {
-		return new TransactionEvent(transactionId, customerId, amountMinor, currency, merchantId, merchantCategory,
-				channel, merchantCountry, occurredAt);
+		return new TransactionEvent(transactionId, customerId, cardId, amountMinor, currency, merchantId,
+				merchantCategory, channel, merchantCountry, occurredAt);
 	}
 
 }
