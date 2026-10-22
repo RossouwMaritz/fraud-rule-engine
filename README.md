@@ -165,6 +165,28 @@ The rule and engine tests are plain unit tests. The Spring tests start a throwaw
 
 `EvaluationServiceTest` also checks concurrency and replays: 10 events for one customer, posted from parallel threads, give exactly 10 rows with `VELOCITY` on the 6th and later. The same event posted twice gives one row and the same result both times.
 
+## Load test
+
+`loadtest/fraud.js` is a [k6](https://k6.io) script. It runs in Docker against the compose stack, so there is nothing to install:
+
+```bash
+docker compose up --build --wait
+docker run --rm --network fraud-rule-engine_default -v "$PWD/loadtest:/scripts" \
+  --env-file .env grafana/k6:0.57.0 run /scripts/fraud.js
+docker compose down -v   # afterwards: each run stores ~100k transactions and floods GET /flags
+```
+
+It runs two scenarios, one after the other, each with 50 virtual users posting as fast as they can for 30 seconds. "Many customers" uses a new customer for every request. "One customer" sends every request for the same customer. Results, from the second run on a fresh database (the first run warms up the JVM). The one-customer numbers moved by about a quarter between runs, so the table gives the range over three warm runs:
+
+| Scenario | Requests per second | p50 | p99 | Errors |
+| --- | --- | --- | --- | --- |
+| Many customers | about 3,400 | 13 ms | 36 ms | 0 |
+| One customer | 170 to 230 | 185 to 250 ms | 670 to 880 ms | 0 |
+
+Machine: an Apple M3 Max laptop, with the app, Postgres and k6 all in one Rancher Desktop VM (14 CPUs, 8 GB). Nothing was tuned. A real deployment, with Postgres on its own host, will give different numbers. k6 prints each scenario's rate over the whole 65-second run, so the table divides its request count by 30 seconds instead.
+
+**One customer's events run one at a time.** This is on purpose: the advisory lock makes the `VELOCITY` count exact. 50 requests for one customer queue on that one lock, so each waits for the ones ahead of it. That's where the 200 ms or so comes from. Each request also gets slower as the customer's history grows, because the history rules load every event in the window around it, and this test puts thousands of events in 10 minutes. A real card doesn't come close to 170 events a second.
+
 ## Design decisions
 
 - **Synchronous REST, no broker.** The caller gets the decision in the response, and one database transaction both evaluates and stores it. So there is no gap where an event is accepted but not yet scored, and no queue to run. If a caller's network drops, it simply retries, and the retry is safe (see Idempotency below).
