@@ -89,6 +89,9 @@ Rules never touch the database, so each one is a plain unit test.
 | --- | --- | --- |
 | `FRAUD_API_KEY` | none, required | The key callers send in `X-API-Key` |
 | `FRAUD_MAX_EVENT_AGE` | `45d` | An older `occurredAt` gets `400` |
+| `FRAUD_CLOCK_SKEW` | `5m` | How far in the future `occurredAt` may be, for clocks that differ between systems |
+| `FRAUD_API_DEFAULT_PAGE_SIZE` | `20` | `size` of `GET /api/v1/flags` when none is given |
+| `FRAUD_API_MAX_PAGE_SIZE` | `100` | Largest `size` of `GET /api/v1/flags`. At most `100` |
 | `FRAUD_REVIEW_FROM` | `40` | Lowest total score for `REVIEW` |
 | `FRAUD_HIGH_RISK_FROM` | `80` | Lowest total score for `HIGH_RISK`. Must be above `FRAUD_REVIEW_FROM` |
 | `FRAUD_HIGH_AMOUNT_ENABLED`, `_SCORE` | `true`, `40` | `HIGH_AMOUNT` on or off, and its score |
@@ -134,7 +137,7 @@ Every `/api/**` call needs the `X-API-Key` header. A missing or wrong key gets `
 | --- | --- |
 | `POST /api/v1/transactions` | `201` with the evaluation. Sending the same transaction again gets `200` with the stored result, and a reused ID with different details gets `409` (see [Idempotency](#design-decisions)) |
 | `GET /api/v1/transactions/{id}` | `200` with the transaction and its evaluation, or `404` |
-| `GET /api/v1/flags` | A page of `REVIEW` and `HIGH_RISK` transactions, newest first. Filters: `customerId`, `decision`, `ruleId`, `from` (inclusive), `to` (exclusive), `page`, `size` (max 100) |
+| `GET /api/v1/flags` | A page of `REVIEW` and `HIGH_RISK` transactions, newest first. Filters: `customerId`, `decision`, `ruleId`, `from` (inclusive), `to` (exclusive), `page`, `size` (default 20, max 100) |
 | `GET /api/v1/rules` | The bands and rule config the app is running with, and its `configVersion` |
 
 Errors use the standard JSON error format (RFC 9457), with `title`, `status` and `detail` fields. A validation `400` adds an `errors` list:

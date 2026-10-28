@@ -13,6 +13,10 @@ fraud:
   api-key: ${FRAUD_API_KEY} # no default, so the app won't start without it
   # An older occurredAt gets 400. Late events are still scored, against what happened on both sides of them.
   max-event-age: ${FRAUD_MAX_EVENT_AGE:45d}
+  api:
+    clock-skew: ${FRAUD_CLOCK_SKEW:5m} # how far in the future occurredAt may be
+    default-page-size: ${FRAUD_API_DEFAULT_PAGE_SIZE:20}
+    max-page-size: ${FRAUD_API_MAX_PAGE_SIZE:100} # at most 100, the hits batch size
   # Every value below is ${ENV_VAR:default}. The README lists them all.
   bands:
     review-from: ${FRAUD_REVIEW_FROM:40}

@@ -9,6 +9,7 @@ import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
+import com.fraudengine.api.ApiProperties;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.test.context.ConfigDataApplicationContextInitializer;
@@ -38,7 +39,21 @@ class FraudRulesPropertiesTest {
 					Map.of("ZAR", 5_000_000L, "USD", 300_000L, "EUR", 300_000L, "GBP", 250_000L));
 			assertThat(properties.rules().highRiskCategory().categories()).containsExactlyInAnyOrder("GAMBLING",
 					"CRYPTO", "MONEY_TRANSFER");
+			assertThat(context.getBean(ApiProperties.class)).isEqualTo(new ApiProperties(Duration.ofMinutes(5), 20, 100));
 		});
+	}
+
+	@Test
+	void badApiValuesFailStartup() {
+		runner.withPropertyValues("fraud.api.clock-skew=-1s")
+			.run(context -> assertThat(context).getFailure().rootCause().hasMessageContaining("clockSkew"));
+		runner.withPropertyValues("fraud.api.default-page-size=0")
+			.run(context -> assertThat(context).getFailure().rootCause().hasMessageContaining("defaultPageSize"));
+		// Over the @BatchSize on TransactionEntity.hits.
+		runner.withPropertyValues("fraud.api.max-page-size=101")
+			.run(context -> assertThat(context).getFailure().rootCause().hasMessageContaining("maxPageSize"));
+		runner.withPropertyValues("fraud.api.default-page-size=50", "fraud.api.max-page-size=40")
+			.run(context -> assertThat(context).getFailure().rootCause().hasMessageContaining("max-page-size"));
 	}
 
 	@Test
@@ -76,13 +91,15 @@ class FraudRulesPropertiesTest {
 			.getPropertySources()
 			.addFirst(new SystemEnvironmentPropertySource(StandardEnvironment.SYSTEM_ENVIRONMENT_PROPERTY_SOURCE_NAME,
 					Map.of("FRAUD_VELOCITY_MAX_COUNT", "8", "FRAUD_COUNTRY_HOP_WINDOW", "3h",
-							"FRAUD_HIGH_AMOUNT_ZAR", "100", "FRAUD_HIGH_RISK_CATEGORIES", "CRYPTO,ADULT"))))
+							"FRAUD_HIGH_AMOUNT_ZAR", "100", "FRAUD_HIGH_RISK_CATEGORIES", "CRYPTO,ADULT",
+							"FRAUD_CLOCK_SKEW", "30s", "FRAUD_API_MAX_PAGE_SIZE", "50"))))
 			.run(context -> {
 				var rules = context.getBean(FraudRulesProperties.class).rules();
 				assertThat(rules.velocity().maxCount()).isEqualTo(8);
 				assertThat(rules.countryHop().window()).isEqualTo(Duration.ofHours(3));
 				assertThat(rules.highAmount().thresholdsMinor()).containsEntry("ZAR", 100L);
 				assertThat(rules.highRiskCategory().categories()).containsExactlyInAnyOrder("CRYPTO", "ADULT");
+				assertThat(context.getBean(ApiProperties.class)).isEqualTo(new ApiProperties(Duration.ofSeconds(30), 20, 50));
 			});
 	}
 
@@ -112,7 +129,7 @@ class FraudRulesPropertiesTest {
 			.run(context -> assertThat(context).getFailure().rootCause().hasMessageContaining("window"));
 	}
 
-	@EnableConfigurationProperties(FraudRulesProperties.class)
+	@EnableConfigurationProperties({ FraudRulesProperties.class, ApiProperties.class })
 	static class Config {
 
 	}

@@ -13,7 +13,6 @@ import com.fraudengine.service.StoredTransaction;
 import com.fraudengine.service.TransactionQueryService;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import jakarta.validation.Valid;
-import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import org.springframework.data.web.PagedModel;
 import org.springframework.http.HttpStatus;
@@ -42,12 +41,15 @@ public class FraudApiController {
 
 	private final RuleConfigVersion configVersion;
 
+	private final ApiProperties api;
+
 	public FraudApiController(EvaluationService evaluations, TransactionQueryService queries,
-			FraudRulesProperties rules, RuleConfigVersion configVersion) {
+			FraudRulesProperties rules, RuleConfigVersion configVersion, ApiProperties api) {
 		this.evaluations = evaluations;
 		this.queries = queries;
 		this.rules = rules;
 		this.configVersion = configVersion;
+		this.api = api;
 	}
 
 	/** 201 for a new evaluation, 200 for a replay of a stored one. */
@@ -86,7 +88,10 @@ public class FraudApiController {
 			@RequestParam(required = false) Decision decision, @RequestParam(required = false) String ruleId,
 			@RequestParam(required = false) Instant from, @RequestParam(required = false) Instant to,
 			@RequestParam(defaultValue = "0") @Min(0) int page,
-			@RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {
+			@RequestParam(defaultValue = "${fraud.api.default-page-size}") @Min(1) int size) {
+		if (size > api.maxPageSize()) {
+			throw invalidField("size", "must be less than or equal to " + api.maxPageSize());
+		}
 		return new PagedModel<>(queries.flags(customerId, decision, ruleId, from, to, page, size));
 	}
 
