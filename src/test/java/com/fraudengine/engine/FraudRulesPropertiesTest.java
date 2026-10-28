@@ -1,7 +1,13 @@
 package com.fraudengine.engine;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Map;
+import java.util.Set;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -78,6 +84,18 @@ class FraudRulesPropertiesTest {
 				assertThat(rules.highAmount().thresholdsMinor()).containsEntry("ZAR", 100L);
 				assertThat(rules.highRiskCategory().categories()).containsExactlyInAnyOrder("CRYPTO", "ADULT");
 			});
+	}
+
+	// A misspelt name on either side is silently ignored at runtime, so the two files must list the same names.
+	@Test
+	void envExampleListsExactlyTheVariablesInApplicationYml() throws IOException {
+		var inYml = names(Pattern.compile("\\$\\{(FRAUD_[A-Z_]+)"), Path.of("src/main/resources/application.yml"));
+		var inEnvExample = names(Pattern.compile("(?m)^(?:# )?(FRAUD_[A-Z_]+)="), Path.of(".env.example"));
+		assertThat(inEnvExample).isEqualTo(inYml);
+	}
+
+	private static Set<String> names(Pattern pattern, Path file) throws IOException {
+		return pattern.matcher(Files.readString(file)).results().map(m -> m.group(1)).collect(Collectors.toSet());
 	}
 
 	@Test
