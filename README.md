@@ -83,22 +83,31 @@ Rules never touch the database, so each one is a plain unit test.
 
 **Repeat payments.** Building the scenarios test showed that monthly rent got flagged. One large payment among many small ones always looks unusual. So `AMOUNT_ANOMALY` skips a payment with the same merchant, amount and currency as one 25 to 35 days earlier (35 covers a 31-day month). Without this check, the rent case in the scenarios test comes out `REVIEW`. The 25-day minimum means a fraudster can't clear a flagged amount by just paying it again straight away. And only a `CLEAN` earlier payment counts, so a flagged amount is still flagged a month later. The cost: a new recurring payment that was flagged the first time stays flagged every month, until an analyst workflow can mark it as fine.
 
-**Tuning.** Every threshold, score and band lives under `fraud:` in `src/main/resources/application.yml`. Any of them can be overridden with an environment variable, for example `FRAUD_RULES_VELOCITY_MAXCOUNT=8` for `fraud.rules.velocity.max-count`. To get the name, uppercase the key, turn dots into underscores and drop the dashes. With Docker, add it to the app's `environment` in `docker-compose.yml`. Restart the app after a change. A bad value (a negative score, a currency limit of zero, `high-risk-from` not above `review-from`) stops the app at startup.
+**Tuning.** Every threshold, score and band is set by an environment variable. `src/main/resources/application.yml` holds the defaults as `${FRAUD_VELOCITY_MAX_COUNT:5}`, and nothing is hard-coded in Java. With Docker, set the variable in `.env`, which compose passes to the app. Restart the app after a change. A bad value (a negative score, a currency limit of zero, `high-risk-from` not above `review-from`) stops the app at startup. Durations take a unit: `10m`, `2h`, `30d`.
 
-```yaml
-fraud:
-  bands:
-    review-from: 40
-    high-risk-from: 80
-  rules:
-    velocity:
-      enabled: true
-      score: 40
-      max-count: 5
-      window: 10m
-```
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `FRAUD_API_KEY` | none, required | The key callers send in `X-API-Key` |
+| `FRAUD_MAX_EVENT_AGE` | `45d` | An older `occurredAt` gets `400` |
+| `FRAUD_REVIEW_FROM` | `40` | Lowest total score for `REVIEW` |
+| `FRAUD_HIGH_RISK_FROM` | `80` | Lowest total score for `HIGH_RISK`. Must be above `FRAUD_REVIEW_FROM` |
+| `FRAUD_HIGH_AMOUNT_ENABLED`, `_SCORE` | `true`, `40` | `HIGH_AMOUNT` on or off, and its score |
+| `FRAUD_HIGH_AMOUNT_ZAR`, `_USD`, `_EUR`, `_GBP` | `5000000`, `300000`, `300000`, `250000` | Limits in minor units. Add a currency with `FRAUD_RULES_HIGHAMOUNT_THRESHOLDSMINOR_<CODE>` |
+| `FRAUD_AMOUNT_ANOMALY_ENABLED`, `_SCORE` | `true`, `50` | `AMOUNT_ANOMALY` on or off, and its score |
+| `FRAUD_AMOUNT_ANOMALY_MIN_HISTORY` | `10` | `CLEAN` transactions needed before the rule can fire |
+| `FRAUD_AMOUNT_ANOMALY_LOOKBACK` | `30d` | How far back the baseline goes |
+| `FRAUD_AMOUNT_ANOMALY_STDDEV_MULTIPLIER` | `3` | Standard deviations above the average that count as unusual |
+| `FRAUD_AMOUNT_ANOMALY_REPEAT_MIN_AGE`, `_MAX_AGE` | `25d`, `35d` | Window for a repeat payment that never fires |
+| `FRAUD_VELOCITY_ENABLED`, `_SCORE` | `true`, `40` | `VELOCITY` on or off, and its score |
+| `FRAUD_VELOCITY_MAX_COUNT` | `5` | Most transactions per card allowed in the window |
+| `FRAUD_VELOCITY_WINDOW` | `10m` | The sliding window |
+| `FRAUD_COUNTRY_HOP_ENABLED`, `_SCORE` | `true`, `80` | `COUNTRY_HOP` on or off, and its score |
+| `FRAUD_COUNTRY_HOP_WINDOW` | `2h` | Card-present transactions in two countries closer than this fire |
+| `FRAUD_HIGH_RISK_CATEGORY_ENABLED`, `_SCORE` | `true`, `20` | `HIGH_RISK_CATEGORY` on or off, and its score |
+| `FRAUD_HIGH_RISK_CATEGORIES` | `GAMBLING,CRYPTO,MONEY_TRANSFER` | Comma-separated merchant categories |
+| `SPRING_DATASOURCE_URL`, `_USERNAME`, `_PASSWORD` | none, required | The Postgres connection. Compose builds them from the `POSTGRES_*` values in `.env` |
 
-`GET /api/v1/rules` shows the config the app is running with.
+`.env.example` lists every variable with its default. `GET /api/v1/rules` shows the config the app is running with.
 
 **Config versions.** At startup the app hashes the bands and rules (SHA-256 of their JSON, first 12 hex characters) into a `configVersion`, logs it, and stores the config in the `rule_configs` table if it's new. Every decision stores the version it was made with, and the API returns it. So an auditor can look up the exact thresholds behind a decision months later:
 

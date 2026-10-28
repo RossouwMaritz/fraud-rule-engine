@@ -65,6 +65,22 @@ class FraudRulesPropertiesTest {
 	}
 
 	@Test
+	void namedEnvVarsOverrideTheDefaults() {
+		runner.withInitializer(context -> context.getEnvironment()
+			.getPropertySources()
+			.addFirst(new SystemEnvironmentPropertySource(StandardEnvironment.SYSTEM_ENVIRONMENT_PROPERTY_SOURCE_NAME,
+					Map.of("FRAUD_VELOCITY_MAX_COUNT", "8", "FRAUD_COUNTRY_HOP_WINDOW", "3h",
+							"FRAUD_HIGH_AMOUNT_ZAR", "100", "FRAUD_HIGH_RISK_CATEGORIES", "CRYPTO,ADULT"))))
+			.run(context -> {
+				var rules = context.getBean(FraudRulesProperties.class).rules();
+				assertThat(rules.velocity().maxCount()).isEqualTo(8);
+				assertThat(rules.countryHop().window()).isEqualTo(Duration.ofHours(3));
+				assertThat(rules.highAmount().thresholdsMinor()).containsEntry("ZAR", 100L);
+				assertThat(rules.highRiskCategory().categories()).containsExactlyInAnyOrder("CRYPTO", "ADULT");
+			});
+	}
+
+	@Test
 	void zeroOrNegativeCurrencyLimitFailsStartup() {
 		runner.withPropertyValues("fraud.rules.high-amount.thresholds-minor.USD=0")
 			.run(context -> assertThat(context).getFailure().rootCause().hasMessageContaining("thresholdsMinor"));

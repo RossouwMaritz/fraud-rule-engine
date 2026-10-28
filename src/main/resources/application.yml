@@ -12,44 +12,46 @@ spring:
 fraud:
   api-key: ${FRAUD_API_KEY} # no default, so the app won't start without it
   # An older occurredAt gets 400. Late events are still scored, against what happened on both sides of them.
-  max-event-age: 45d
+  max-event-age: ${FRAUD_MAX_EVENT_AGE:45d}
+  # Every value below is ${ENV_VAR:default}. The README lists them all.
   bands:
-    review-from: 40
-    high-risk-from: 80
+    review-from: ${FRAUD_REVIEW_FROM:40}
+    high-risk-from: ${FRAUD_HIGH_RISK_FROM:80}
   rules:
     high-amount:
-      enabled: true
-      score: 40
+      enabled: ${FRAUD_HIGH_AMOUNT_ENABLED:true}
+      score: ${FRAUD_HIGH_AMOUNT_SCORE:40}
       # Minor units of each currency. A currency not listed here always fires, so it gets a review.
+      # Add another currency with FRAUD_RULES_HIGHAMOUNT_THRESHOLDSMINOR_<CODE>.
       thresholds-minor:
-        ZAR: 5000000 # R50,000.00
-        USD: 300000 # $3,000.00
-        EUR: 300000 # €3,000.00
-        GBP: 250000 # £2,500.00
+        ZAR: ${FRAUD_HIGH_AMOUNT_ZAR:5000000} # R50,000.00
+        USD: ${FRAUD_HIGH_AMOUNT_USD:300000} # $3,000.00
+        EUR: ${FRAUD_HIGH_AMOUNT_EUR:300000} # €3,000.00
+        GBP: ${FRAUD_HIGH_AMOUNT_GBP:250000} # £2,500.00
     amount-anomaly:
-      enabled: true
-      score: 50
-      min-history: 10
-      lookback: 30d
-      stddev-multiplier: 3
+      enabled: ${FRAUD_AMOUNT_ANOMALY_ENABLED:true}
+      score: ${FRAUD_AMOUNT_ANOMALY_SCORE:50}
+      min-history: ${FRAUD_AMOUNT_ANOMALY_MIN_HISTORY:10}
+      lookback: ${FRAUD_AMOUNT_ANOMALY_LOOKBACK:30d}
+      stddev-multiplier: ${FRAUD_AMOUNT_ANOMALY_STDDEV_MULTIPLIER:3}
       # The same merchant and amount one billing cycle back (rent, a debit order) is never an anomaly.
       # A quicker repeat doesn't count, so a fraudster can't clear a flagged amount by paying it twice.
       # Only CLEAN transactions count, for both the baseline and the repeat, so a flagged amount stays flagged.
-      repeat-min-age: 25d
-      repeat-max-age: 35d # spans a 31-day month
+      repeat-min-age: ${FRAUD_AMOUNT_ANOMALY_REPEAT_MIN_AGE:25d}
+      repeat-max-age: ${FRAUD_AMOUNT_ANOMALY_REPEAT_MAX_AGE:35d} # spans a 31-day month
     velocity:
-      enabled: true
-      score: 40
-      max-count: 5
-      window: 10m
+      enabled: ${FRAUD_VELOCITY_ENABLED:true}
+      score: ${FRAUD_VELOCITY_SCORE:40}
+      max-count: ${FRAUD_VELOCITY_MAX_COUNT:5}
+      window: ${FRAUD_VELOCITY_WINDOW:10m}
     country-hop:
-      enabled: true
-      score: 80
-      window: 2h
+      enabled: ${FRAUD_COUNTRY_HOP_ENABLED:true}
+      score: ${FRAUD_COUNTRY_HOP_SCORE:80}
+      window: ${FRAUD_COUNTRY_HOP_WINDOW:2h}
     high-risk-category:
-      enabled: true
-      score: 20
-      categories: [GAMBLING, CRYPTO, MONEY_TRANSFER]
+      enabled: ${FRAUD_HIGH_RISK_CATEGORY_ENABLED:true}
+      score: ${FRAUD_HIGH_RISK_CATEGORY_SCORE:20}
+      categories: ${FRAUD_HIGH_RISK_CATEGORIES:GAMBLING,CRYPTO,MONEY_TRANSFER}
 
 logging:
   structured:
