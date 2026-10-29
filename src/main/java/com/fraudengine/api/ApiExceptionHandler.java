@@ -5,11 +5,13 @@ import org.hibernate.exception.ConstraintViolationException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.TransientDataAccessException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
+import org.springframework.transaction.CannotCreateTransactionException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -65,6 +67,19 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
 			return conflict();
 		}
 		return unexpected(ex);
+	}
+
+	/**
+	 * A lock or statement timeout, a deadlock, or no free database connection: busy, not broken. POST is idempotent,
+	 * so the caller can safely retry the same request.
+	 */
+	@ExceptionHandler({ TransientDataAccessException.class, CannotCreateTransactionException.class })
+	ResponseEntity<ProblemDetail> unavailable(Exception ex) {
+		log.warn("Database busy, returning 503: {}", ex.toString());
+		return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+			.header(HttpHeaders.RETRY_AFTER, "1") // seconds; the waits that cause this are bounded at a few seconds
+			.body(ProblemDetail.forStatusAndDetail(HttpStatus.SERVICE_UNAVAILABLE,
+					"The service is busy. Retry the same request."));
 	}
 
 	@ExceptionHandler(Exception.class)

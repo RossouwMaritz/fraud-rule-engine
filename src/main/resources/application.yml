@@ -4,6 +4,13 @@ spring:
   threads:
     virtual:
       enabled: true
+  datasource:
+    hikari:
+      maximum-pool-size: ${FRAUD_DB_POOL_SIZE:10}
+      # Wait this long for a free connection, then 503. Milliseconds, as Hikari takes a plain number.
+      connection-timeout: ${FRAUD_DB_CONNECTION_TIMEOUT_MS:2000}
+      # Postgres cancels any statement that runs longer than this, and the API returns 503.
+      connection-init-sql: SET statement_timeout = ${FRAUD_DB_STATEMENT_TIMEOUT_MS:5000}
   jpa:
     open-in-view: false
     hibernate:
@@ -13,6 +20,8 @@ fraud:
   api-key: ${FRAUD_API_KEY} # no default, so the app won't start without it
   # An older occurredAt gets 400. Late events are still scored, against what happened on both sides of them.
   max-event-age: ${FRAUD_MAX_EVENT_AGE:45d}
+  # How long a POST waits behind the same customer's other events before it gets 503.
+  lock-timeout: ${FRAUD_LOCK_TIMEOUT:2s}
   api:
     clock-skew: ${FRAUD_CLOCK_SKEW:5m} # how far in the future occurredAt may be
     default-page-size: ${FRAUD_API_DEFAULT_PAGE_SIZE:20}

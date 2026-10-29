@@ -22,6 +22,7 @@ export const options = {
         'http_req_duration{scenario:one_customer}': ['p(99)<10000'],
         'http_reqs{scenario:many_customers}': ['count>0'],
         'http_reqs{scenario:one_customer}': ['count>0'],
+        'http_reqs{scenario:one_customer,status:503}': ['count>=0'],
         checks: ['rate==1'],
     },
     summaryTrendStats: ['p(50)', 'p(99)', 'max'],
@@ -42,5 +43,6 @@ export default function () {
         merchantCountry: 'ZA',
         occurredAt: new Date().toISOString(),
     }), { headers });
-    check(res, { 'status is 201': (r) => r.status === 201 });
+    // One customer's requests queue on one lock, so some may wait out FRAUD_LOCK_TIMEOUT and get 503. Many never should.
+    check(res, { 'status is 201, or 503 for one customer': (r) => r.status === 201 || (busy && r.status === 503) });
 }

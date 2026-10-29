@@ -14,8 +14,10 @@ import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.Assert;
 
 @Service
 public class EvaluationService {
@@ -38,8 +40,14 @@ public class EvaluationService {
 
 	private final String configVersion;
 
+	private final Duration lockTimeout;
+
 	public EvaluationService(TransactionRepository repository, RuleEngine engine, MeterRegistry meters,
-			FraudRulesProperties properties, RuleConfigVersion configVersion) {
+			FraudRulesProperties properties, RuleConfigVersion configVersion,
+			@Value("${fraud.lock-timeout}") Duration lockTimeout) {
+		// Postgres reads 0 as "wait forever", the very thing this setting is for.
+		Assert.isTrue(lockTimeout.toMillis() > 0, "fraud.lock-timeout (env FRAUD_LOCK_TIMEOUT) must be at least 1ms");
+		this.lockTimeout = lockTimeout;
 		this.repository = repository;
 		this.engine = engine;
 		this.meters = meters;
@@ -55,7 +63,9 @@ public class EvaluationService {
 	public EvaluationResult evaluate(TransactionEvent txn) {
 		var sample = Timer.start(meters);
 		try {
-			// Serialise each customer's events so history rules see each other's events.
+			// Serialise each customer's events so history rules see each other's events. A busy customer gets 503
+			// after lockTimeout instead of a request that waits as long as the queue is.
+			repository.setLockTimeout(lockTimeout.toMillis());
 			repository.lockCustomer(txn.customerId());
 
 			var stored = repository.findById(txn.transactionId());

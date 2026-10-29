@@ -3,6 +3,8 @@ package com.fraudengine.api;
 import java.time.Duration;
 import java.time.Instant;
 
+import javax.sql.DataSource;
+
 import com.fraudengine.TestcontainersConfiguration;
 import com.fraudengine.engine.FraudRulesProperties;
 import com.fraudengine.service.RuleConfigVersion;
@@ -51,6 +53,12 @@ class FraudApiControllerTest {
 
 	@Autowired
 	RuleConfigVersion configVersion;
+
+	@Autowired
+	DataSource dataSource;
+
+	@Value("${fraud.lock-timeout}")
+	Duration lockTimeout;
 
 	@Test
 	void postEvaluatesThenReplayReturnsTheSameBodyWith200() throws Exception {
@@ -204,6 +212,28 @@ class FraudApiControllerTest {
 			.param("to", T0.plusSeconds(600).toString()))
 			.andExpect(jsonPath("$.content[*].transaction.transactionId").value(
 					contains("txn_f_review")));
+	}
+
+	@Test
+	void customerLockedLongerThanTheLockTimeoutIs503WithRetryAfter() throws Exception {
+		var body = json("txn_api_locked", "cus_api_locked", 10_000, "GROCERIES", "ONLINE", "ZA", T0);
+		// Another transaction holds the customer's lock, as a slow evaluation for the same customer would.
+		try (var holder = dataSource.getConnection()) {
+			holder.setAutoCommit(false);
+			try (var lock = holder.prepareStatement("select pg_advisory_xact_lock(hashtext(?))")) {
+				lock.setString(1, "cus_api_locked");
+				lock.execute();
+			}
+			var started = System.nanoTime();
+			postTransaction(body).andExpect(status().isServiceUnavailable())
+				.andExpect(header().string("Retry-After", "1"))
+				.andExpect(jsonPath("$.status").value(503));
+			assertThat(Duration.ofNanos(System.nanoTime() - started)).isBetween(lockTimeout,
+					lockTimeout.plusSeconds(1));
+			holder.rollback();
+		}
+		// Nothing was stored, so the retry is scored as new.
+		postTransaction(body).andExpect(status().isCreated());
 	}
 
 	@Test

@@ -83,7 +83,7 @@ Rules never touch the database, so each one is a plain unit test.
 
 **Repeat payments.** Building the scenarios test showed that monthly rent got flagged. One large payment among many small ones always looks unusual. So `AMOUNT_ANOMALY` skips a payment with the same merchant, amount and currency as one 25 to 35 days earlier (35 covers a 31-day month). Without this check, the rent case in the scenarios test comes out `REVIEW`. The 25-day minimum means a fraudster can't clear a flagged amount by just paying it again straight away. And only a `CLEAN` earlier payment counts, so a flagged amount is still flagged a month later. The cost: a new recurring payment that was flagged the first time stays flagged every month, until an analyst workflow can mark it as fine.
 
-**Tuning.** Every threshold, score and band is set by an environment variable. `src/main/resources/application.yml` holds the defaults as `${FRAUD_VELOCITY_MAX_COUNT:5}`, and nothing is hard-coded in Java. With Docker, set the variable in `.env`, which compose passes to the app. Restart the app after a change. A bad value (a negative score, a currency limit of zero, `high-risk-from` not above `review-from`) stops the app at startup. Durations take a unit: `10m`, `2h`, `30d`.
+**Tuning.** Every threshold, score and band is set by an environment variable. `src/main/resources/application.yml` holds the defaults as `${FRAUD_VELOCITY_MAX_COUNT:5}`, and nothing is hard-coded in Java. With Docker, set the variable in `.env`, which compose passes to the app. Restart the app after a change. A bad value (a negative score, a currency limit of zero, `high-risk-from` not above `review-from`) stops the app at startup. Durations take a unit: `10m`, `2h`, `30d`. The `_MS` ones are plain milliseconds.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
@@ -92,6 +92,10 @@ Rules never touch the database, so each one is a plain unit test.
 | `FRAUD_CLOCK_SKEW` | `5m` | How far in the future `occurredAt` may be, for clocks that differ between systems |
 | `FRAUD_API_DEFAULT_PAGE_SIZE` | `20` | `size` of `GET /api/v1/flags` when none is given |
 | `FRAUD_API_MAX_PAGE_SIZE` | `100` | Largest `size` of `GET /api/v1/flags`. At most `100` |
+| `FRAUD_LOCK_TIMEOUT` | `2s` | How long a `POST` waits behind the same customer's other events before it gets `503`. At least `1ms` |
+| `FRAUD_DB_POOL_SIZE` | `10` | Database connections per app instance |
+| `FRAUD_DB_CONNECTION_TIMEOUT_MS` | `2000` | How long a request waits for a free connection before it gets `503` |
+| `FRAUD_DB_STATEMENT_TIMEOUT_MS` | `5000` | Postgres cancels any statement that runs longer, and the request gets `503` |
 | `FRAUD_REVIEW_FROM` | `40` | Lowest total score for `REVIEW` |
 | `FRAUD_HIGH_RISK_FROM` | `80` | Lowest total score for `HIGH_RISK`. Must be above `FRAUD_REVIEW_FROM` |
 | `FRAUD_HIGH_AMOUNT_ENABLED`, `_SCORE` | `true`, `40` | `HIGH_AMOUNT` on or off, and its score |
@@ -146,6 +150,8 @@ Errors use the standard JSON error format (RFC 9457), with `title`, `status` and
 {"title": "Bad Request", "status": 400, "detail": "Invalid request content.",
  "errors": [{"field": "currency", "message": "must match \"[A-Z]{3}\""}]}
 ```
+
+When the database is busy, a request gets `503` with `Retry-After: 1` instead of waiting without limit. That happens when a customer's lock, a free connection or a query takes longer than its timeout (see the `FRAUD_LOCK_TIMEOUT` and `FRAUD_DB_*` variables). Nothing is stored on a `503`, and `POST` is idempotent, so retrying the same request is safe.
 
 Amounts are whole minor units (`125000` is R1,250.00), `currency` must be a real ISO 4217 code (`QQQ` gets a `400`), and `occurredAt` may be at most 5 minutes in the future and at most 45 days in the past (`fraud.max-event-age`). An older event gets a `400` on `occurredAt`.
 
@@ -204,6 +210,8 @@ It runs two scenarios, one after the other, each with 50 virtual users posting a
 Machine: an Apple M3 Max laptop, with the app, Postgres and k6 all in one Rancher Desktop VM (14 CPUs, 8 GB). The laptop was busy with other work too (load average 7 to 14). Nothing was tuned. A real deployment, with Postgres on its own host, will give different numbers. k6 prints each scenario's rate over the whole 65-second run, so the table divides its request count by 30 seconds instead.
 
 **One customer's events run one at a time.** This is on purpose: the advisory lock makes the `VELOCITY` count exact. 50 requests for one customer queue on that one lock, so each waits for the ones ahead of it. That's where the 140 to 300 ms comes from. Each request also gets slower as the card's history grows, because the history rules load every event in the window around it, and this test puts thousands of events on one card in 10 minutes. A real card doesn't come close to 160 events a second.
+
+**A wait has a limit.** A request that waits longer than `FRAUD_LOCK_TIMEOUT` (2s) for its customer's lock gets `503` instead of a growing wait. At the default, the one-customer run gave no `503`s: its slowest request was under 1 second, well inside 2s. With `FRAUD_LOCK_TIMEOUT=100ms`, 257 of 4,085 one-customer requests got `503`, and every other request still got `201`. That run was on a heavily loaded laptop (load average 15), so take its latencies as rough. They are left out of the table. The script accepts `503` only in the one-customer scenario, and prints how many there were.
 
 ## Design decisions
 

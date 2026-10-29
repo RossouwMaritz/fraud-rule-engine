@@ -12,6 +12,10 @@ import org.springframework.data.jpa.repository.Query;
 public interface TransactionRepository
 		extends JpaRepository<TransactionEntity, String>, JpaSpecificationExecutor<TransactionEntity> {
 
+	/** How long this transaction waits for any lock, {@link #lockCustomer} included: {@code SET LOCAL lock_timeout}. */
+	@Query(value = "select set_config('lock_timeout', cast(:millis as text), true)", nativeQuery = true)
+	String setLockTimeout(long millis);
+
 	/** Blocks until no other transaction holds this customer's lock. Released at commit or rollback. */
 	@Query(value = "select 1 from pg_advisory_xact_lock(hashtext(:customerId))", nativeQuery = true)
 	int lockCustomer(String customerId);
