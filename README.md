@@ -92,6 +92,8 @@ Rules never touch the database, so each one is a plain unit test.
 | `FRAUD_CLOCK_SKEW` | `5m` | How far in the future `occurredAt` may be, for clocks that differ between systems |
 | `FRAUD_API_DEFAULT_PAGE_SIZE` | `20` | `size` of `GET /api/v1/flags` when none is given |
 | `FRAUD_API_MAX_PAGE_SIZE` | `100` | Largest `size` of `GET /api/v1/flags`. At most `100` |
+| `FRAUD_SHUTDOWN_TIMEOUT` | `20s` | On `SIGTERM`, how long in-flight requests get to finish |
+| `MANAGEMENT_SERVER_PORT` | `8081` | Port for health and metrics |
 | `FRAUD_LOCK_TIMEOUT` | `2s` | How long a `POST` waits behind the same customer's other events before it gets `503`. At least `1ms` |
 | `FRAUD_DB_POOL_SIZE` | `10` | Database connections per app instance |
 | `FRAUD_DB_CONNECTION_TIMEOUT_MS` | `2000` | How long a request waits for a free connection before it gets `503` |
@@ -157,7 +159,17 @@ Amounts are whole minor units (`125000` is R1,250.00), `currency` must be a real
 
 Every response carries an `X-Request-Id` header. A caller's own ID is kept if it is 1 to 64 characters of `A-Z a-z 0-9 . _ -`, otherwise the app makes one. Logs are JSON (Elastic Common Schema), and every line from a request carries its `requestId`, so one request can be followed through the logs.
 
-Swagger UI is at <http://localhost:8080/swagger-ui.html>. Click **Authorize** and enter the key to try calls. In production, turn the docs off with `springdoc.api-docs.enabled=false` and `springdoc.swagger-ui.enabled=false`. Health is at `/actuator/health` and needs no key. Prometheus metrics are at `/actuator/prometheus` and need the key.
+Swagger UI is at <http://localhost:8080/swagger-ui.html>. Click **Authorize** and enter the key to try calls. In production, turn the docs off with `springdoc.api-docs.enabled=false` and `springdoc.swagger-ui.enabled=false`.
+
+## Running it
+
+Health and metrics are on their own port, `8081` (`MANAGEMENT_SERVER_PORT`), so they're never exposed with the API. Compose doesn't publish `8081`, so reach it from inside the container: `docker compose exec app curl -s localhost:8081/actuator/health`.
+
+- **Liveness** is `/actuator/health/liveness`. It only says the app is running, so an orchestrator restarts the app only when the app itself is stuck. It leaves the database out, because restarting every pod doesn't fix a database outage.
+- **Readiness** is `/actuator/health/readiness`, and it includes the database. When Postgres is down it returns `503`, so the orchestrator stops sending traffic, and it returns `200` again once Postgres is back. The Docker health check uses readiness too.
+- **Health** endpoints need no key. Prometheus metrics, at `/actuator/prometheus`, need the API key.
+- **Shutdown is graceful.** On `SIGTERM` the app stops taking new requests and lets the ones in flight finish, for up to `FRAUD_SHUTDOWN_TIMEOUT` (20s). Compose waits 30s (`stop_grace_period`) before it kills the app.
+- **Limits.** Compose restarts both containers unless you stop them, and caps memory: 768 MB for the app, 512 MB for Postgres. The JVM heap is 75% of the container's memory (`JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=75`, set in the `Dockerfile`).
 
 ## Testing
 
@@ -165,7 +177,7 @@ Tests need JDK 25 (check with `java -version`), or set `JAVA_HOME` to point at i
 
 ```bash
 ./mvnw test     # unit and Spring tests
-./mvnw verify   # the above, plus the FraudScenariosIT and RuleConfigVersionIT integration tests
+./mvnw verify   # the above, plus the FraudScenariosIT, RuleConfigVersionIT and ManagementServerIT integration tests
 ```
 
 The rule and engine tests are plain unit tests. The Spring tests start a throwaway Postgres 17 in Docker (using Testcontainers), so Docker must be running for both commands. To run only the tests that don't need Docker: `./mvnw test -Dtest='RuleEngineTest,FraudRulesPropertiesTest,*RuleTest'`.

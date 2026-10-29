@@ -56,12 +56,6 @@ class ApiKeySecurityTest {
 	}
 
 	@Test
-	void healthNeedsNoKey() throws Exception {
-		mvc.perform(get("/actuator/health")).andExpect(status().isOk());
-		mvc.perform(get("/actuator/prometheus")).andExpect(status().isUnauthorized());
-	}
-
-	@Test
 	void apiDocsNeedNoKeyAndDeclareIt() throws Exception {
 		mvc.perform(get("/v3/api-docs"))
 			.andExpect(status().isOk())

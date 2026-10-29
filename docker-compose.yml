@@ -7,6 +7,11 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
@@ -15,6 +20,13 @@ services:
 
   app:
     build: .
+    restart: unless-stopped
+    # Longer than FRAUD_SHUTDOWN_TIMEOUT (20s), so in-flight requests finish before Docker kills the app.
+    stop_grace_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 768M
     # Passes every FRAUD_* setting through. Unset ones fall back to the defaults in application.yml.
     env_file: .env
     depends_on:
@@ -25,5 +37,6 @@ services:
       SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER}
       SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
       FRAUD_API_KEY: ${FRAUD_API_KEY:?set FRAUD_API_KEY in .env}
+    # Only the API. Health and metrics stay on 8081 inside the network.
     ports:
       - "8080:8080"

@@ -1,6 +1,13 @@
+server:
+  # On SIGTERM, stop taking new requests and let in-flight ones finish, up to the timeout below.
+  shutdown: graceful
+
 spring:
   application:
     name: fraud-rule-engine
+  lifecycle:
+    # Below the orchestrator's kill deadline (compose stop_grace_period), so requests finish before a SIGKILL.
+    timeout-per-shutdown-phase: ${FRAUD_SHUTDOWN_TIMEOUT:20s}
   threads:
     virtual:
       enabled: true
@@ -72,7 +79,18 @@ logging:
       console: ecs # JSON, and each request's lines carry its requestId
 
 management:
+  server:
+    port: ${MANAGEMENT_SERVER_PORT:8081} # its own port, so health and metrics are never exposed with the API
   endpoints:
     web:
       exposure:
         include: health,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      group:
+        # Readiness takes a pod out of traffic when Postgres is down. Liveness leaves out db, so a database
+        # outage doesn't restart every pod.
+        readiness:
+          include: readinessState,db

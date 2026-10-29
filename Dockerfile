@@ -19,7 +19,10 @@ COPY --from=build /build/extracted/dependencies/ ./
 COPY --from=build /build/extracted/spring-boot-loader/ ./
 COPY --from=build /build/extracted/snapshot-dependencies/ ./
 COPY --from=build /build/extracted/application/ ./
-EXPOSE 8080
+# Heap scales with the container's memory limit instead of the JVM's default of a quarter of it.
+ENV JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=75"
+# 8080 is the API, 8081 health and metrics (MANAGEMENT_SERVER_PORT).
+EXPOSE 8080 8081
 HEALTHCHECK --interval=10s --timeout=3s --start-period=30s --retries=5 \
-    CMD curl -fs http://localhost:8080/actuator/health || exit 1
+    CMD curl -fs http://localhost:${MANAGEMENT_SERVER_PORT:-8081}/actuator/health/readiness || exit 1
 ENTRYPOINT ["java", "-jar", "app.jar"]
