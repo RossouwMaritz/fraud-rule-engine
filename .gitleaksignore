@@ -1,0 +1,7 @@
+# Known non-secrets: the local dev key in README's curl examples and the test profile's key.
+# shortcut: listed by commit fingerprint, so a new commit that adds the dev key again is flagged; allowlist the key in a
+# .gitleaks.toml if that gets noisy.
+7d2bfcc14a0706235687abdb58360f5cde04b9c3:README.md:curl-auth-header:48
+7d2bfcc14a0706235687abdb58360f5cde04b9c3:src/test/resources/application-test.yml:generic-api-key:2
+01c8aa4e398a0c2b0c44991aee23f5e90a444c9d:README.md:curl-auth-header:20
+01c8aa4e398a0c2b0c44991aee23f5e90a444c9d:README.md:curl-auth-header:43

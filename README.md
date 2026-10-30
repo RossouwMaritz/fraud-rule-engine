@@ -176,7 +176,18 @@ Swagger UI is at <http://localhost:8080/swagger-ui.html>. Click **Authorize** an
 
 **Database login.** The app connects as `fraud_app`, which may only read and add rows (`SELECT` and `INSERT`). It can't change or delete a stored decision, drop or alter a table, or touch Flyway's history. Migrations run as the table owner (`SPRING_FLYWAY_USER`). Compose creates the `fraud_app` login with `postgres/init-app-role.sh`, and the `V4` migration grants its rights. Elsewhere, create the login before the first migration. A new table needs a grant in its own migration, and `AppRoleTest` fails until it has one. The Spring tests connect as `fraud_app` too, so code that needs a right production doesn't have fails in the tests, not after a deploy. The app container still gets the owner's password, because Flyway runs inside the app at startup. In a real deployment, run migrations as a separate job so the app never has it.
 
-**Container.** The image runs as a non-root user, has no curl or other extra tools, and pins both base images by digest, so a rebuild gets the same base. Dependabot (`.github/dependabot.yml`) opens a PR each week a base image has a new digest, so security fixes still arrive, through CI. Compose makes the container's filesystem read-only, except a `tmpfs` at `/tmp` for Tomcat's work files, and sets `no-new-privileges`, so no process in it can gain more rights.
+**Container.** The image runs as a non-root user, has no curl or other extra tools, and pins both base images by digest, so a rebuild gets the same base. Dependabot (`.github/dependabot.yml`) opens a PR each week when a base image has a new digest, so security fixes still arrive, through CI. Compose makes the container's filesystem read-only, except a `tmpfs` at `/tmp` for Tomcat's work files, and sets `no-new-privileges`, so no process in it can gain more rights.
+
+**CI.** Every push and PR runs `.github/workflows/ci.yml`. First `test` runs `./mvnw verify`, with the coverage floor. When it passes, four jobs run side by side:
+
+| Job | What fails it |
+|---|---|
+| `codeql` | Nothing yet: CodeQL's Java findings show in the repo's Security tab |
+| `gitleaks` | A secret in any commit. The example keys in this README and the test profile are listed in `.gitleaksignore` |
+| `trivy-fs` | A HIGH or CRITICAL CVE with a fix available in a Maven dependency, or a secret in the files |
+| `image` | The same, in the built image's OS packages and jars. It also saves a CycloneDX SBOM (`sbom` artifact) |
+
+The workflow's token can only read the repo, and only `codeql` may also write security results. Every action is pinned by commit SHA, so a moved tag can't change what runs. A new push to a PR cancels that PR's older run. Dependabot opens a PR each week for Maven dependencies, base image digests and action SHAs.
 
 ## Running it
 
@@ -196,6 +207,8 @@ Tests need JDK 25 (check with `java -version`), or set `JAVA_HOME` to point at i
 ./mvnw test     # unit and Spring tests
 ./mvnw verify   # the above, plus the FraudScenariosIT, RuleConfigVersionIT and ManagementServerIT integration tests
 ```
+
+`verify` also checks test coverage with JaCoCo, counting unit tests and integration tests together. It fails if line coverage drops below 93% or branch coverage below 90% (today: 95.6% and 93.4%). The report is in `target/site/jacoco/index.html`.
 
 The rule and engine tests are plain unit tests. The Spring tests start a throwaway Postgres 17 in Docker (using Testcontainers), so Docker must be running for both commands. To run only the tests that don't need Docker: `./mvnw test -Dtest='RuleEngineTest,FraudRulesPropertiesTest,*RuleTest'`.
 

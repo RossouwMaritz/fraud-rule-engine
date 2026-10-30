@@ -1,8 +1,16 @@
-# Opens a PR when a base image in the Dockerfile has a new digest, so pinned images still get security fixes.
-# CI builds and tests the PR like any other.
+# Opens a PR each week when a dependency, a pinned base image digest or a pinned action SHA has an update, so security
+# fixes still arrive. CI builds, tests and scans the PR like any other.
 version: 2
 updates:
+  - package-ecosystem: maven
+    directory: /
+    schedule:
+      interval: weekly
   - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
