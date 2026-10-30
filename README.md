@@ -16,7 +16,7 @@ docker compose up --build -d --wait   # returns once the app is healthy
 ./samples/send.sh
 ```
 
-`send.sh` posts the 21 events in `samples/transactions.json` in order. It prints each decision and the rules that fired. If every decision matches the expected one, it exits with `0`. If any doesn't, it exits with `1`. The API key, `local-dev-key-0123456789abcdefghij`, comes from `.env`. An `.env` from before keys had a minimum length still has `local-dev-key`, which the app now refuses: copy the new key from `.env.example`. It moves every `occurredAt` so the last event lands at midnight (UTC) today, keeping the gaps between events, because the app rejects events more than 45 days old. Running it again the same day replays the stored results. On a later day, start from an empty database first: `docker compose down -v`.
+`send.sh` posts the 21 events in `samples/transactions.json` in order. It prints each decision and the rules that fired. If every decision matches the expected one, it exits with `0`. If any doesn't, it exits with `1`. The API key, `local-dev-key-0123456789abcdefghij`, comes from `.env`. An `.env` from before keys had a minimum length still has `local-dev-key`, which the app now refuses: copy the new key from `.env.example`. One from before the app had its own database login also lacks `POSTGRES_APP_PASSWORD`: copy that line too, then run `docker compose down -v` once, because Postgres only creates the login on an empty volume. It moves every `occurredAt` so the last event lands at midnight (UTC) today, keeping the gaps between events, because the app rejects events more than 45 days old. Running it again the same day replays the stored results. On a later day, start from an empty database first: `docker compose down -v`.
 
 To score one transaction yourself, run the command below. Amounts are in minor units (cents for ZAR), so `6000000` is R60,000.00. `occurredAt` must be in the last 45 days, so move it to a recent time if this one has aged out.
 
@@ -120,7 +120,8 @@ Rules never touch the database, so each one is a plain unit test.
 | `FRAUD_COUNTRY_HOP_WINDOW` | `2h` | Card-present transactions in two countries closer than this fire |
 | `FRAUD_HIGH_RISK_CATEGORY_ENABLED`, `_SCORE` | `true`, `20` | `HIGH_RISK_CATEGORY` on or off, and its score |
 | `FRAUD_HIGH_RISK_CATEGORIES` | `GAMBLING,CRYPTO,MONEY_TRANSFER` | Comma-separated merchant categories |
-| `SPRING_DATASOURCE_URL`, `_USERNAME`, `_PASSWORD` | none, required | The Postgres connection. Compose builds them from the `POSTGRES_*` values in `.env` |
+| `SPRING_DATASOURCE_URL`, `_USERNAME`, `_PASSWORD` | none, required | The Postgres connection the app uses. Compose connects as `fraud_app` with `POSTGRES_APP_PASSWORD` from `.env` |
+| `SPRING_FLYWAY_USER`, `_PASSWORD` | the datasource login | The login migrations run as, which owns the tables. Compose uses `POSTGRES_USER` and `POSTGRES_PASSWORD` |
 
 `.env.example` lists every variable with its default. `GET /api/v1/rules` shows the config the app is running with.
 
@@ -173,12 +174,16 @@ Swagger UI is at <http://localhost:8080/swagger-ui.html>. Click **Authorize** an
 
 **Rate limit.** Each API key gets 1,000 requests a second (`FRAUD_RATE_LIMIT_PER_SECOND`), with bursts of up to 2,000 (`FRAUD_RATE_LIMIT_BURST`). Over that, a request gets `429` with `Retry-After` in seconds, and nothing is stored. Only requests with a valid key are counted, so one caller can't use up another's limit. The limit is per app instance: with 3 replicas a key gets 3× as much. With more than one replica, move the limit to the gateway or a shared store like Redis.
 
+**Database login.** The app connects as `fraud_app`, which may only read and add rows (`SELECT` and `INSERT`). It can't change or delete a stored decision, drop or alter a table, or touch Flyway's history. Migrations run as the table owner (`SPRING_FLYWAY_USER`). Compose creates the `fraud_app` login with `postgres/init-app-role.sh`, and the `V4` migration grants its rights. Elsewhere, create the login before the first migration. A new table needs a grant in its own migration, and `AppRoleTest` fails until it has one. The app container still gets the owner's password, because Flyway runs inside the app at startup. In a real deployment, run migrations as a separate job so the app never has it.
+
+**Container.** The image runs as a non-root user, has no curl or other extra tools, and pins both base images by digest, so a rebuild gets the same base until someone updates the digests on purpose. Compose makes the container's filesystem read-only, except a `tmpfs` at `/tmp` for Tomcat's work files, and sets `no-new-privileges`, so no process in it can gain more rights.
+
 ## Running it
 
-Health and metrics are on their own port, `8081` (`MANAGEMENT_SERVER_PORT`), so they're never exposed with the API. Compose doesn't publish `8081`, so reach it from inside the container: `docker compose exec app curl -s localhost:8081/actuator/health`.
+Health and metrics are on their own port, `8081` (`MANAGEMENT_SERVER_PORT`), so they're never exposed with the API. Compose doesn't publish `8081`, and the image has no curl, so reach it from a curl container on the compose network: `docker run --rm --network fraud-rule-engine_default curlimages/curl:8.11.1 -s app:8081/actuator/health`.
 
 - **Liveness** is `/actuator/health/liveness`. It only says the app is running, so an orchestrator restarts the app only when the app itself is stuck. It leaves the database out, because restarting every pod doesn't fix a database outage.
-- **Readiness** is `/actuator/health/readiness`, and it includes the database. When Postgres is down it returns `503`, so the orchestrator stops sending traffic, and it returns `200` again once Postgres is back. The Docker health check uses readiness too.
+- **Readiness** is `/actuator/health/readiness`, and it includes the database. When Postgres is down it returns `503`, so the orchestrator stops sending traffic, and it returns `200` again once Postgres is back. Compose's health check uses readiness too. The image has no curl, so the check is a few lines of bash.
 - **Health** endpoints need no key. Prometheus metrics, at `/actuator/prometheus`, need the API key.
 - **Shutdown is graceful.** On `SIGTERM` the app stops taking new requests and lets the ones in flight finish, for up to `FRAUD_SHUTDOWN_TIMEOUT` (20s). Compose waits 30s (`stop_grace_period`) before it kills the app.
 - **Limits.** Compose restarts both containers unless you stop them, and caps memory: 768 MB for the app, 512 MB for Postgres. The JVM heap is 40% of the container's memory (`-XX:MaxRAMPercentage=40` in `JAVA_TOOL_OPTIONS`, set in the `Dockerfile`). If the heap fills up anyway, the JVM exits (`-XX:+ExitOnOutOfMemoryError`) and compose restarts it, rather than leaving it running half broken. The rest is for what the JVM and malloc use outside the heap, which under the load test was about 460MB. At 75% the app was killed for using too much memory. `MALLOC_ARENA_MAX=2` cuts about 95MB of malloc overhead. Under the load test the app peaks at about 610MB of its 768MB.

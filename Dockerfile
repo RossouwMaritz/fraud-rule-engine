@@ -1,4 +1,6 @@
-FROM eclipse-temurin:25-jdk AS build
+# Pinned by digest (the multi-platform index of 25.0.5_8, 2026-10-29), so a rebuild gets the same base. Update both
+# digests together, on purpose, for a new JDK or security fixes.
+FROM eclipse-temurin:25-jdk@sha256:83f4a7fc27df94dcc7b8de04d14cbbba8da14406f921e966969c3b09000aa507 AS build
 WORKDIR /build
 # Dependencies first, so a code change reuses this layer.
 COPY mvnw pom.xml ./
@@ -9,10 +11,9 @@ RUN ./mvnw -B package -DskipTests \
     && mv target/*.jar app.jar \
     && java -Djarmode=tools -jar app.jar extract --layers --destination extracted
 
-FROM eclipse-temurin:25-jre
-# The JRE image has no curl or wget for the health check.
-RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/* \
-    && useradd --system --no-create-home app
+FROM eclipse-temurin:25-jre@sha256:ecdc0adb37bde1a281c4d245a3cd535004b1fc8322d560f5b09463b248c81df0
+# No curl or other extra tools: the orchestrator runs the health checks (compose, or Kubernetes probes).
+RUN useradd --system --no-create-home app
 USER app
 WORKDIR /app
 COPY --from=build /build/extracted/dependencies/ ./
@@ -26,6 +27,4 @@ COPY --from=build /build/extracted/application/ ./
 ENV JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=40 -XX:+ExitOnOutOfMemoryError" MALLOC_ARENA_MAX=2
 # 8080 is the API, 8081 health and metrics (MANAGEMENT_SERVER_PORT).
 EXPOSE 8080 8081
-HEALTHCHECK --interval=10s --timeout=3s --start-period=30s --retries=5 \
-    CMD curl -fs http://localhost:${MANAGEMENT_SERVER_PORT:-8081}/actuator/health/readiness || exit 1
 ENTRYPOINT ["java", "-jar", "app.jar"]

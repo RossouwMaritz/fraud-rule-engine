@@ -7,6 +7,10 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD:?set POSTGRES_APP_PASSWORD in .env}
+    volumes:
+      # Creates the app's login on an empty volume only. After adding it, run `docker compose down -v` once.
+      - ./postgres/init-app-role.sh:/docker-entrypoint-initdb.d/init-app-role.sh:ro
     restart: unless-stopped
     deploy:
       resources:
@@ -34,12 +38,29 @@ services:
         condition: service_healthy
     environment:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB}
-      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER}
-      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
+      # The app runs as fraud_app, which can only read and add rows. Flyway migrates as the table owner.
+      # shortcut: the app container still holds the owner password for Flyway at startup; run migrations as a separate job so the app never sees it, when it is deployed to an orchestrator.
+      SPRING_DATASOURCE_USERNAME: fraud_app
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_APP_PASSWORD}
+      SPRING_FLYWAY_USER: ${POSTGRES_USER}
+      SPRING_FLYWAY_PASSWORD: ${POSTGRES_PASSWORD}
       FRAUD_API_KEY: ${FRAUD_API_KEY:?set FRAUD_API_KEY in .env}
       FRAUD_DOCS_ENABLED: ${FRAUD_DOCS_ENABLED:-true} # Swagger UI for local use
       # Read from the shell too, so the load test can raise it for one run.
       FRAUD_RATE_LIMIT_PER_SECOND: ${FRAUD_RATE_LIMIT_PER_SECOND:-1000}
+    # The image has no curl, so bash asks for readiness itself.
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/localhost/$${MANAGEMENT_SERVER_PORT:-8081} && printf 'GET /actuator/health/readiness HTTP/1.0\\r\\n\\r\\n' >&3 && head -1 <&3 | grep -q ' 200 '"]
+      interval: 10s
+      timeout: 3s
+      start_period: 30s
+      retries: 5
+    # Nothing in the container can be changed, except /tmp (Tomcat's work files), and no process can gain privileges.
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
     # Only the API. Health and metrics stay on 8081 inside the network.
     ports:
       - "8080:8080"
