@@ -22,8 +22,8 @@ COPY --from=build /build/extracted/application/ ./
 # Heap scales with the container's memory limit instead of the JVM's default of a quarter of it. Only 40%, because
 # under the load test the JVM used ~270MB outside the heap (metaspace, code, GC) and malloc ~190MB more: a 75% heap
 # got the container OOM-killed at 768M. The heap itself peaked at ~160MB. Two malloc arenas, not one per CPU,
-# cut ~95MB of that malloc overhead.
-ENV JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=40" MALLOC_ARENA_MAX=2
+# cut ~95MB of that malloc overhead. On a full heap the JVM exits, so it's restarted instead of running half broken.
+ENV JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=40 -XX:+ExitOnOutOfMemoryError" MALLOC_ARENA_MAX=2
 # 8080 is the API, 8081 health and metrics (MANAGEMENT_SERVER_PORT).
 EXPOSE 8080 8081
 HEALTHCHECK --interval=10s --timeout=3s --start-period=30s --retries=5 \
