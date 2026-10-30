@@ -8,10 +8,11 @@ on:
 permissions:
   contents: read
 
-# A new push to a PR cancels its older run. Runs on main always finish.
+# A new push to a PR cancels its older run. Every other run gets its own group (head_ref is only set on PRs), so
+# a quick series of pushes to main tests each commit instead of cancelling the waiting run.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
 
 # Actions are pinned by commit SHA, so a moved tag can't change what runs. Dependabot bumps them.
 jobs:
