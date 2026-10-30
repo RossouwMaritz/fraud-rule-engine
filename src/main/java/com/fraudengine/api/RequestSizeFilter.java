@@ -14,6 +14,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ProblemDetail;
 import org.springframework.stereotype.Component;
+import org.springframework.util.Assert;
 import org.springframework.util.unit.DataSize;
 import org.springframework.web.filter.OncePerRequestFilter;
 import tools.jackson.databind.json.JsonMapper;
@@ -32,6 +33,8 @@ class RequestSizeFilter extends OncePerRequestFilter {
 	private final JsonMapper jsonMapper;
 
 	RequestSizeFilter(@Value("${fraud.max-request-body}") DataSize maxBody, JsonMapper jsonMapper) {
+		// A GET's length is -1, so a negative limit would turn every request into a 413.
+		Assert.isTrue(maxBody.toBytes() > 0, "fraud.max-request-body (env FRAUD_MAX_REQUEST_BODY) must be positive");
 		this.maxBodyBytes = maxBody.toBytes();
 		this.jsonMapper = jsonMapper;
 	}
