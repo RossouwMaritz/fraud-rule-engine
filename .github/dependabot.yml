@@ -1,0 +1,8 @@
+# Opens a PR when a base image in the Dockerfile has a new digest, so pinned images still get security fixes.
+# CI builds and tests the PR like any other.
+version: 2
+updates:
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
