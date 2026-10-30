@@ -32,7 +32,9 @@ class SecurityConfig {
 
 	@Bean
 	SecurityFilterChain apiKeySecurity(HttpSecurity http, @Value("${fraud.api-keys}") List<String> apiKeys,
-			@Value("${fraud.docs-enabled}") boolean docsEnabled, JsonMapper jsonMapper) {
+			@Value("${fraud.docs-enabled}") boolean docsEnabled,
+			@Value("${fraud.rate-limit.per-second}") double ratePerSecond, @Value("${fraud.rate-limit.burst}") int burst,
+			JsonMapper jsonMapper) {
 		return http.csrf(AbstractHttpConfigurer::disable)
 			.sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
 			.authorizeHttpRequests(a -> {
@@ -45,6 +47,8 @@ class SecurityConfig {
 				a.anyRequest().authenticated();
 			})
 			.addFilterBefore(new ApiKeyFilter(apiKeys), AuthorizationFilter.class)
+			// Not a @Component: Boot would also register it outside security, where no request is authenticated yet.
+			.addFilterAfter(new RateLimitFilter(ratePerSecond, burst, jsonMapper), ApiKeyFilter.class)
 			.exceptionHandling(e -> e.authenticationEntryPoint((request, response, ex) -> {
 				response.setStatus(HttpStatus.UNAUTHORIZED.value());
 				response.setContentType(MediaType.APPLICATION_PROBLEM_JSON_VALUE);

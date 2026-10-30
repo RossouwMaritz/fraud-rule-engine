@@ -28,6 +28,10 @@ fraud:
   # Comma-separated, so a new key can be added before the old one is removed. At least 32 characters each.
   # FRAUD_API_KEY still works for a single key. No default, so the app won't start without one.
   api-keys: ${FRAUD_API_KEYS:${FRAUD_API_KEY:}}
+  # Per API key and per app instance. Over the limit gets 429 with Retry-After.
+  rate-limit:
+    per-second: ${FRAUD_RATE_LIMIT_PER_SECOND:1000}
+    burst: ${FRAUD_RATE_LIMIT_BURST:2000} # requests allowed at once after a quiet spell
   # Swagger UI and /v3/api-docs. Off by default; compose turns them on for local use.
   docs-enabled: ${FRAUD_DOCS_ENABLED:false}
   # A bigger body gets 413 before it is read. A transaction is well under 1KB.

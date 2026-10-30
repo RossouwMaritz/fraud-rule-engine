@@ -38,6 +38,8 @@ services:
       SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
       FRAUD_API_KEY: ${FRAUD_API_KEY:?set FRAUD_API_KEY in .env}
       FRAUD_DOCS_ENABLED: ${FRAUD_DOCS_ENABLED:-true} # Swagger UI for local use
+      # Read from the shell too, so the load test can raise it for one run.
+      FRAUD_RATE_LIMIT_PER_SECOND: ${FRAUD_RATE_LIMIT_PER_SECOND:-1000}
     # Only the API. Health and metrics stay on 8081 inside the network.
     ports:
       - "8080:8080"

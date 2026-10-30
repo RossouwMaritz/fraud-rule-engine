@@ -90,6 +90,8 @@ Rules never touch the database, so each one is a plain unit test.
 | `FRAUD_API_KEY` | none, required | The key callers send in `X-API-Key`. At least 32 characters |
 | `FRAUD_API_KEYS` | none | Comma-separated keys, for rotation. When set, it replaces `FRAUD_API_KEY` |
 | `FRAUD_DOCS_ENABLED` | `false` | Swagger UI and `/v3/api-docs`. Compose sets it to `true` for local use |
+| `FRAUD_RATE_LIMIT_PER_SECOND` | `1000` | Requests per second per API key, per app instance. Over it gets `429` |
+| `FRAUD_RATE_LIMIT_BURST` | `2000` | Requests per API key allowed at once after a quiet spell |
 | `FRAUD_MAX_REQUEST_BODY` | `16KB` | A bigger body gets `413` |
 | `FRAUD_MAX_REQUEST_HEADER_SIZE` | `8KB` | Bigger request headers get `400` |
 | `FRAUD_MAX_EVENT_AGE` | `45d` | An older `occurredAt` gets `400` |
@@ -169,6 +171,8 @@ Swagger UI is at <http://localhost:8080/swagger-ui.html>. Click **Authorize** an
 
 **Size limits.** A body over 16KB (`FRAUD_MAX_REQUEST_BODY`) gets `413` before anything reads it. A transaction is under 1KB. A chunked body has no length to check up front, so it gets `411`: send `Content-Length`. Request headers over 8KB get `400`.
 
+**Rate limit.** Each API key gets 1,000 requests a second (`FRAUD_RATE_LIMIT_PER_SECOND`), with bursts of up to 2,000 (`FRAUD_RATE_LIMIT_BURST`). Over that, a request gets `429` with `Retry-After` in seconds, and nothing is stored. Only requests with a valid key are counted, so one caller can't use up another's limit. The limit is per app instance: with 3 replicas a key gets 3× as much. With more than one replica, move the limit to the gateway or a shared store like Redis.
+
 ## Running it
 
 Health and metrics are on their own port, `8081` (`MANAGEMENT_SERVER_PORT`), so they're never exposed with the API. Compose doesn't publish `8081`, so reach it from inside the container: `docker compose exec app curl -s localhost:8081/actuator/health`.
@@ -214,7 +218,7 @@ The rule and engine tests are plain unit tests. The Spring tests start a throwaw
 `loadtest/fraud.js` is a [k6](https://k6.io) script. It runs in Docker against the compose stack, so there is nothing to install:
 
 ```bash
-docker compose up --build --wait
+FRAUD_RATE_LIMIT_PER_SECOND=100000 docker compose up --build --wait   # well above the test's rate, so no 429s
 docker run --rm --network fraud-rule-engine_default -v "$PWD/loadtest:/scripts" \
   --env-file .env grafana/k6:0.57.0 run /scripts/fraud.js
 docker compose down -v   # afterwards: each run stores ~100k transactions and floods GET /flags
