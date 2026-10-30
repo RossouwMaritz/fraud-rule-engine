@@ -1,4 +1,5 @@
 server:
+  max-http-request-header-size: ${FRAUD_MAX_REQUEST_HEADER_SIZE:8KB}
   # On SIGTERM, stop taking new requests and let in-flight ones finish, up to the timeout below.
   shutdown: graceful
 
@@ -24,7 +25,13 @@ spring:
       ddl-auto: validate
 
 fraud:
-  api-key: ${FRAUD_API_KEY} # no default, so the app won't start without it
+  # Comma-separated, so a new key can be added before the old one is removed. At least 32 characters each.
+  # FRAUD_API_KEY still works for a single key. No default, so the app won't start without one.
+  api-keys: ${FRAUD_API_KEYS:${FRAUD_API_KEY:}}
+  # Swagger UI and /v3/api-docs. Off by default; compose turns them on for local use.
+  docs-enabled: ${FRAUD_DOCS_ENABLED:false}
+  # A bigger body gets 413 before it is read. A transaction is well under 1KB.
+  max-request-body: ${FRAUD_MAX_REQUEST_BODY:16KB}
   # An older occurredAt gets 400. Late events are still scored, against what happened on both sides of them.
   max-event-age: ${FRAUD_MAX_EVENT_AGE:45d}
   # How long a POST waits behind the same customer's other events before it gets 503.
@@ -72,6 +79,12 @@ fraud:
       enabled: ${FRAUD_HIGH_RISK_CATEGORY_ENABLED:true}
       score: ${FRAUD_HIGH_RISK_CATEGORY_SCORE:20}
       categories: ${FRAUD_HIGH_RISK_CATEGORIES:GAMBLING,CRYPTO,MONEY_TRANSFER}
+
+springdoc:
+  api-docs:
+    enabled: ${fraud.docs-enabled}
+  swagger-ui:
+    enabled: ${fraud.docs-enabled}
 
 logging:
   structured:

@@ -16,13 +16,13 @@ docker compose up --build -d --wait   # returns once the app is healthy
 ./samples/send.sh
 ```
 
-`send.sh` posts the 21 events in `samples/transactions.json` in order. It prints each decision and the rules that fired. If every decision matches the expected one, it exits with `0`. If any doesn't, it exits with `1`. The API key, `local-dev-key`, comes from `.env`. It moves every `occurredAt` so the last event lands at midnight (UTC) today, keeping the gaps between events, because the app rejects events more than 45 days old. Running it again the same day replays the stored results. On a later day, start from an empty database first: `docker compose down -v`.
+`send.sh` posts the 21 events in `samples/transactions.json` in order. It prints each decision and the rules that fired. If every decision matches the expected one, it exits with `0`. If any doesn't, it exits with `1`. The API key, `local-dev-key-0123456789abcdefghij`, comes from `.env`. An `.env` from before keys had a minimum length still has `local-dev-key`, which the app now refuses: copy the new key from `.env.example`. It moves every `occurredAt` so the last event lands at midnight (UTC) today, keeping the gaps between events, because the app rejects events more than 45 days old. Running it again the same day replays the stored results. On a later day, start from an empty database first: `docker compose down -v`.
 
 To score one transaction yourself, run the command below. Amounts are in minor units (cents for ZAR), so `6000000` is R60,000.00. `occurredAt` must be in the last 45 days, so move it to a recent time if this one has aged out.
 
 ```bash
 curl -i http://localhost:8080/api/v1/transactions \
-  -H 'X-API-Key: local-dev-key' -H 'Content-Type: application/json' \
+  -H 'X-API-Key: local-dev-key-0123456789abcdefghij' -H 'Content-Type: application/json' \
   -d '{"transactionId": "txn_readme_01", "customerId": "cus_readme", "cardId": "card_readme",
        "amountMinor": 6000000, "currency": "ZAR", "merchantId": "mer_casino", "merchantCategory": "GAMBLING",
        "channel": "ONLINE", "merchantCountry": "ZA", "occurredAt": "2026-10-19T10:00:00Z"}'
@@ -45,7 +45,7 @@ Location: /api/v1/transactions/txn_readme_01
 }
 ```
 
-Then list everything that was flagged: `curl -H 'X-API-Key: local-dev-key' 'http://localhost:8080/api/v1/flags'`.
+Then list everything that was flagged: `curl -H 'X-API-Key: local-dev-key-0123456789abcdefghij' 'http://localhost:8080/api/v1/flags'`.
 
 ## Architecture
 
@@ -87,7 +87,11 @@ Rules never touch the database, so each one is a plain unit test.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `FRAUD_API_KEY` | none, required | The key callers send in `X-API-Key` |
+| `FRAUD_API_KEY` | none, required | The key callers send in `X-API-Key`. At least 32 characters |
+| `FRAUD_API_KEYS` | none | Comma-separated keys, for rotation. When set, it replaces `FRAUD_API_KEY` |
+| `FRAUD_DOCS_ENABLED` | `false` | Swagger UI and `/v3/api-docs`. Compose sets it to `true` for local use |
+| `FRAUD_MAX_REQUEST_BODY` | `16KB` | A bigger body gets `413` |
+| `FRAUD_MAX_REQUEST_HEADER_SIZE` | `8KB` | Bigger request headers get `400` |
 | `FRAUD_MAX_EVENT_AGE` | `45d` | An older `occurredAt` gets `400` |
 | `FRAUD_CLOCK_SKEW` | `5m` | How far in the future `occurredAt` may be, for clocks that differ between systems |
 | `FRAUD_API_DEFAULT_PAGE_SIZE` | `20` | `size` of `GET /api/v1/flags` when none is given |
@@ -159,7 +163,11 @@ Amounts are whole minor units (`125000` is R1,250.00), `currency` must be a real
 
 Every response carries an `X-Request-Id` header. A caller's own ID is kept if it is 1 to 64 characters of `A-Z a-z 0-9 . _ -`, otherwise the app makes one. Logs are JSON (Elastic Common Schema), and every line from a request carries its `requestId`, so one request can be followed through the logs.
 
-Swagger UI is at <http://localhost:8080/swagger-ui.html>. Click **Authorize** and enter the key to try calls. In production, turn the docs off with `springdoc.api-docs.enabled=false` and `springdoc.swagger-ui.enabled=false`.
+Swagger UI is at <http://localhost:8080/swagger-ui.html>. Click **Authorize** and enter the key to try calls. The docs are off unless `FRAUD_DOCS_ENABLED=true`, which compose sets for local use. When they're off, their paths need the key and then return `404`.
+
+**Keys.** Every key must be at least 32 characters, or the app won't start. Make one with `openssl rand -base64 32`. To rotate without downtime, set `FRAUD_API_KEYS=old,new`, move callers to the new key, then set it to `new` alone. Each request is checked against every key in constant time, so timing doesn't show which key matched, or how much of a key was right.
+
+**Size limits.** A body over 16KB (`FRAUD_MAX_REQUEST_BODY`) gets `413` before anything reads it. A transaction is under 1KB. A chunked body has no length to check up front, so it gets `411`: send `Content-Length`. Request headers over 8KB get `400`.
 
 ## Running it
 

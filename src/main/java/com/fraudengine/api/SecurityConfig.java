@@ -1,5 +1,7 @@
 package com.fraudengine.api;
 
+import java.util.List;
+
 import io.swagger.v3.oas.annotations.enums.SecuritySchemeIn;
 import io.swagger.v3.oas.annotations.enums.SecuritySchemeType;
 import io.swagger.v3.oas.annotations.security.SecurityScheme;
@@ -14,12 +16,11 @@ import org.springframework.security.config.annotation.web.configurers.AbstractHt
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.access.intercept.AuthorizationFilter;
-import org.springframework.util.Assert;
 import tools.jackson.databind.json.JsonMapper;
 
 /**
- * Every endpoint needs the API key except health checks and the API docs. Stateless, so there is no session or
- * CSRF token.
+ * Every endpoint needs the API key except health checks, and the API docs when they're on. Stateless, so there is no
+ * session or CSRF token.
  */
 @Configuration
 @SecurityScheme(name = SecurityConfig.OPENAPI_SCHEME, type = SecuritySchemeType.APIKEY, in = SecuritySchemeIn.HEADER,
@@ -30,18 +31,20 @@ class SecurityConfig {
 	static final String OPENAPI_SCHEME = "apiKey";
 
 	@Bean
-	SecurityFilterChain apiKeySecurity(HttpSecurity http, @Value("${fraud.api-key}") String apiKey,
-			JsonMapper jsonMapper) {
-		Assert.hasText(apiKey, "fraud.api-key (env FRAUD_API_KEY) must not be blank");
+	SecurityFilterChain apiKeySecurity(HttpSecurity http, @Value("${fraud.api-keys}") List<String> apiKeys,
+			@Value("${fraud.docs-enabled}") boolean docsEnabled, JsonMapper jsonMapper) {
 		return http.csrf(AbstractHttpConfigurer::disable)
 			.sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-			// A browser can't add a header to a page load, so the docs must be open for Swagger UI to load.
-			.authorizeHttpRequests(a -> a
-				.requestMatchers("/actuator/health/**", "/swagger-ui.html", "/swagger-ui/**", "/v3/api-docs/**")
-				.permitAll()
-				.anyRequest()
-				.authenticated())
-			.addFilterBefore(new ApiKeyFilter(apiKey), AuthorizationFilter.class)
+			.authorizeHttpRequests(a -> {
+				a.requestMatchers("/actuator/health/**").permitAll();
+				// A browser can't add a header to a page load, so the docs must be open for Swagger UI to load.
+				// When they're off, their paths need the key like any other, so a caller without one learns nothing.
+				if (docsEnabled) {
+					a.requestMatchers("/swagger-ui.html", "/swagger-ui/**", "/v3/api-docs/**").permitAll();
+				}
+				a.anyRequest().authenticated();
+			})
+			.addFilterBefore(new ApiKeyFilter(apiKeys), AuthorizationFilter.class)
 			.exceptionHandling(e -> e.authenticationEntryPoint((request, response, ex) -> {
 				response.setStatus(HttpStatus.UNAUTHORIZED.value());
 				response.setContentType(MediaType.APPLICATION_PROBLEM_JSON_VALUE);

@@ -40,7 +40,7 @@ class FraudScenariosIT {
 	@Autowired
 	MockMvc mvc;
 
-	@Value("${fraud.api-key}")
+	@Value("${fraud.api-keys}") // one key in the test profile
 	String apiKey;
 
 	@Test

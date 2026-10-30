@@ -103,6 +103,20 @@ class FraudRulesPropertiesTest {
 			});
 	}
 
+	@Test
+	void apiKeysComeFromFraudApiKeysElseFraudApiKey() {
+		runner.withInitializer(context -> context.getEnvironment()
+			.getPropertySources()
+			.addFirst(new SystemEnvironmentPropertySource(StandardEnvironment.SYSTEM_ENVIRONMENT_PROPERTY_SOURCE_NAME,
+					Map.of("FRAUD_API_KEY", "single"))))
+			.run(context -> assertThat(context.getEnvironment().getProperty("fraud.api-keys")).isEqualTo("single"));
+		runner.withInitializer(context -> context.getEnvironment()
+			.getPropertySources()
+			.addFirst(new SystemEnvironmentPropertySource(StandardEnvironment.SYSTEM_ENVIRONMENT_PROPERTY_SOURCE_NAME,
+					Map.of("FRAUD_API_KEY", "single", "FRAUD_API_KEYS", "old,new"))))
+			.run(context -> assertThat(context.getEnvironment().getProperty("fraud.api-keys")).isEqualTo("old,new"));
+	}
+
 	// A misspelt name on either side is silently ignored at runtime, so the two files must list the same names.
 	@Test
 	void envExampleListsExactlyTheVariablesInApplicationYml() throws IOException {
