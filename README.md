@@ -18,7 +18,11 @@ docker compose up --build -d --wait   # returns once the app is healthy
 ./samples/send.sh
 ```
 
-`send.sh` posts the 21 events in `samples/transactions.json` in order. It prints each decision and the rules that fired. If every decision matches the expected one, it exits with `0`. If any doesn't, it exits with `1`. The API key, `local-dev-key-0123456789abcdefghij`, comes from `.env`. An `.env` from before keys had a minimum length still has `local-dev-key`, which the app now refuses: copy the new key from `.env.example`. One from before the app had its own database login also lacks `POSTGRES_APP_PASSWORD`: copy that line too, then run `docker compose down -v` once, because Postgres only creates the login on an empty volume. It moves every `occurredAt` so the last event lands at midnight (UTC) today, keeping the gaps between events, because the app rejects events more than 45 days old. Running it again the same day replays the stored results. On a later day, start from an empty database first: `docker compose down -v`.
+`send.sh` posts the 21 events in `samples/transactions.json` in order and prints each decision and the rules that fired. It exits with `0` if every decision is the expected one, and `1` if not. It uses the API key from `.env` (`local-dev-key-0123456789abcdefghij`).
+
+The app rejects events more than 45 days old, so `send.sh` shifts every `occurredAt` to end at midnight (UTC) today, keeping the gaps between events. Running it again the same day replays the stored results. On a later day, empty the database first with `docker compose down -v`.
+
+**Got an older `.env`?** Copy `FRAUD_API_KEY` and `POSTGRES_APP_PASSWORD` from `.env.example`, then run `docker compose down -v` once. The old 13-character key is now too short, and Postgres only creates the app's login on an empty volume.
 
 To score one transaction yourself, run the command below. Amounts are in minor units (cents for ZAR), so `6000000` is R60,000.00. `occurredAt` must be in the last 45 days, so move it to a recent time if this one has aged out.
 
@@ -170,26 +174,35 @@ Every response carries an `X-Request-Id` header. A caller's own ID is kept if it
 
 Swagger UI is at <http://localhost:8080/swagger-ui.html>. Click **Authorize** and enter the key to try calls. The docs are off unless `FRAUD_DOCS_ENABLED=true`, which compose sets for local use. When they're off, their paths need the key and then return `404`.
 
+## Security and CI
+
 **Keys.** Every key must be at least 32 characters, or the app won't start. Make one with `openssl rand -base64 32`. To rotate without downtime, set `FRAUD_API_KEYS=old,new`, move callers to the new key, then set it to `new` alone. Each request is checked against every key in constant time, so timing doesn't show which key matched, or how much of a key was right.
 
 **Size limits.** A body over 16KB (`FRAUD_MAX_REQUEST_BODY`) gets `413` before anything reads it. A transaction is under 1KB. A chunked body has no length to check up front, so it gets `411`: send `Content-Length`. Request headers over 8KB get `400`.
 
-**Rate limit.** Each API key gets 1,000 requests a second (`FRAUD_RATE_LIMIT_PER_SECOND`), with bursts of up to 2,000 (`FRAUD_RATE_LIMIT_BURST`). Over that, a request gets `429` with `Retry-After` in seconds, and nothing is stored. Only requests with a valid key are counted, so one caller can't use up another's limit. The limit is per app instance: with 3 replicas a key gets 3× as much. With more than one replica, move the limit to the gateway or a shared store like Redis.
+**Rate limit.** Each API key gets 1,000 requests a second (`FRAUD_RATE_LIMIT_PER_SECOND`), with bursts of up to 2,000 (`FRAUD_RATE_LIMIT_BURST`). Over that, a request gets `429` with `Retry-After` in seconds, and nothing is stored. Only requests with a valid key count, so one caller can't use up another's limit. The limit is per app instance, so with 3 replicas a key gets 3× as much. With more than one replica, move the limit to a gateway or a shared store like Redis.
 
-**Database login.** The app connects as `fraud_app`, which may only read and add rows (`SELECT` and `INSERT`). It can't change or delete a stored decision, drop or alter a table, or touch Flyway's history. Migrations run as the table owner (`SPRING_FLYWAY_USER`). Compose creates the `fraud_app` login with `postgres/init-app-role.sh`, and the `V4` migration grants its rights. Elsewhere, create the login before the first migration. A new table needs a grant in its own migration, and `AppRoleTest` fails until it has one. The Spring tests connect as `fraud_app` too, so code that needs a right production doesn't have fails in the tests, not after a deploy. The app container still gets the owner's password, because Flyway runs inside the app at startup. In a real deployment, run migrations as a separate job so the app never has it.
+**Database login.** The app connects as `fraud_app`, which can only read and add rows (`SELECT` and `INSERT`). So it can't change or delete a stored decision, change the schema, or touch Flyway's history. Migrations run as the table owner (`SPRING_FLYWAY_USER`).
 
-**Container.** The image runs as a non-root user, has no curl or other extra tools, and pins both base images by digest, so a rebuild gets the same base. Dependabot (`.github/dependabot.yml`) opens a PR each week when a base image has a new digest, so security fixes still arrive, through CI. Compose makes the container's filesystem read-only, except a `tmpfs` at `/tmp` for Tomcat's work files, and sets `no-new-privileges`, so no process in it can gain more rights.
+- Compose creates the `fraud_app` login with `postgres/init-app-role.sh`, and the `V4` migration grants its rights. Anywhere else, create the login before the first migration.
+- A new table needs a grant in its own migration. `AppRoleTest` fails until it has one.
+- The Spring tests connect as `fraud_app` too. So if code needs a right the app doesn't have, the tests fail, not production.
+- The app still gets the owner's password, because Flyway runs inside it at startup. A real deployment should run migrations as a separate job.
 
-**CI.** Every push and PR runs `.github/workflows/ci.yml`. First `test` runs `./mvnw verify`, with the coverage floor. When it passes, four jobs run side by side:
+**Container.** The image runs as a non-root user and has no curl or other extra tools. Both base images are pinned by digest, so a rebuild gets the same base, and Dependabot opens a PR each week when there's a new one. Compose makes the filesystem read-only (except `/tmp`, for Tomcat) and sets `no-new-privileges`, so no process can gain more rights.
 
-| Job | What fails it |
+**CI.** Every push and PR runs `.github/workflows/ci.yml`. First `test` runs `./mvnw verify` with the coverage floor. If it passes, the other jobs run:
+
+| Job | What it does, and what fails it |
 |---|---|
-| `codeql` | Nothing yet: CodeQL's Java findings show in the repo's Security tab |
-| `gitleaks` | A secret in any commit. The example keys in this README and the test profile are listed in `.gitleaksignore` |
-| `trivy-fs` | A HIGH or CRITICAL CVE with a fix available in a Maven dependency, or a secret in the files |
-| `image` | The same, in the built image's OS packages and jars. It also saves a CycloneDX SBOM (`sbom` artifact) |
+| `codeql` | Static analysis. Findings show in the repo's Security tab and don't fail the build yet |
+| `gitleaks` | Fails on a secret in any commit. The example keys in this README and the tests are listed in `.gitleaksignore` |
+| `trivy-fs` | Fails on a HIGH or CRITICAL CVE that has a fix, in a Maven dependency, or on a secret in the files |
+| `image` | Builds the image and scans it the same way. Saves a CycloneDX SBOM (`sbom` artifact) |
+| `deploy-smoke` | Deploys that image to a throwaway kind cluster and runs `samples/send.sh` against it (see [Kubernetes](#kubernetes)) |
+| `publish` | Only on `main` and `v*` tags, after everything else passes. Pushes the image to GHCR and signs it |
 
-The workflow's token can only read the repo, and only `codeql` may also write security results. Every action is pinned by commit SHA, so a moved tag can't change what runs. A new push to a PR cancels that PR's older run. Dependabot opens a PR each week for Maven dependencies, base image digests and action SHAs.
+The workflow's token can only read the repo by default. Every action is pinned by commit SHA, so a moved tag can't change what runs. A new push to a PR cancels that PR's older run. Dependabot opens a PR each week for Maven dependencies, base image digests and action SHAs.
 
 ## Running it
 
@@ -199,7 +212,9 @@ Health and metrics are on their own port, `8081` (`MANAGEMENT_SERVER_PORT`), so 
 - **Readiness** is `/actuator/health/readiness`, and it includes the database. When Postgres is down it returns `503`, so the orchestrator stops sending traffic, and it returns `200` again once Postgres is back. Compose's health check uses readiness too. The image has no curl, so the check is a few lines of bash.
 - **Health** endpoints need no key. Prometheus metrics, at `/actuator/prometheus`, need the API key.
 - **Shutdown is graceful.** On `SIGTERM` the app stops taking new requests and lets the ones in flight finish, for up to `FRAUD_SHUTDOWN_TIMEOUT` (20s). Compose waits 30s (`stop_grace_period`) before it kills the app.
-- **Limits.** Compose restarts both containers unless you stop them, and caps memory: 768 MB for the app, 512 MB for Postgres. The JVM heap is 40% of the container's memory (`-XX:MaxRAMPercentage=40` in `JAVA_TOOL_OPTIONS`, set in the `Dockerfile`). If the heap fills up anyway, the JVM exits (`-XX:+ExitOnOutOfMemoryError`) and compose restarts it, rather than leaving it running half broken. The rest is for what the JVM and malloc use outside the heap, which under the load test was about 460MB. At 75% the app was killed for using too much memory. `MALLOC_ARENA_MAX=2` cuts about 95MB of malloc overhead. Under the load test the app peaks at about 610MB of its 768MB.
+- **Restarts.** Compose restarts both containers unless you stop them.
+- **Memory.** The app is capped at 768 MB and Postgres at 512 MB. The JVM heap gets only 40% of the app's 768 MB (`-XX:MaxRAMPercentage=40` in the `Dockerfile`), because under the load test the JVM and malloc used about 460MB outside the heap. With a 75% heap the app was killed for using too much memory. `MALLOC_ARENA_MAX=2` saves about 95MB more. Under the load test the app peaks at about 610MB.
+- **A full heap restarts the app.** The JVM exits (`-XX:+ExitOnOutOfMemoryError`) and compose starts it again, instead of leaving it running half broken.
 
 ## Kubernetes
 
@@ -278,18 +293,18 @@ Machine: an Apple M3 Max laptop, with the app, Postgres and k6 all in one Ranche
 
 **One customer's events run one at a time.** This is on purpose: the advisory lock makes the `VELOCITY` count exact. 50 requests for one customer queue on that one lock, so each waits for the ones ahead of it. That's where the 200 to 270 ms comes from. Each request also gets slower as the card's history grows, because the history rules load every event in the window around it, and this test puts thousands of events on one card in 10 minutes. A real card doesn't come close to 180 events a second.
 
-**A wait has a limit.** A request that waits longer than `FRAUD_LOCK_TIMEOUT` (2s) for its customer's lock gets `503` instead of a growing wait. At the default, the one-customer run gave no `503`s: its slowest request was under 1 second, well inside 2s. With `FRAUD_LOCK_TIMEOUT=100ms`, 257 of 4,085 one-customer requests got `503`, and every other request still got `201`. That run was on a heavily loaded laptop (load average 15), so take its latencies as rough. They are left out of the table. The script accepts `503` only in the one-customer scenario, and prints how many there were.
+**A wait has a limit.** A request that waits longer than `FRAUD_LOCK_TIMEOUT` (2s) for its customer's lock gets `503` instead of a growing wait. At the default, the one-customer run gave no `503`s: its slowest request was under 1 second, well inside 2s. With `FRAUD_LOCK_TIMEOUT=100ms`, 257 of 4,085 one-customer requests got `503` and the rest got `201`. The laptop was very busy for that run (load average 15), so its latencies aren't in the table. The script accepts `503` only in the one-customer scenario, and prints how many there were.
 
 ## Production readiness
 
-The review before the panel raised four points. This is what changed for each, and how you can check it.
+The review before the panel raised four points. Here's what changed for each, and how to check it.
 
 | Feedback | What changed | How it's checked |
 | --- | --- | --- |
-| **CI/CD** | CI runs as separate jobs: tests with a coverage floor (93% lines, 90% branches), then CodeQL, gitleaks, a Trivy scan of the dependencies and a Trivy scan of the image, with an SBOM. A HIGH or CRITICAL issue that has a fix fails the build. Actions are pinned by commit SHA, the token is read-only by default, and Dependabot updates Maven, the base images and the actions weekly. For CD, the image that was scanned is deployed with the `k8s/` manifests to a throwaway kind cluster, and the sample scenarios run against it. On `main` and `v*` tags, once everything has passed, that same image is pushed to GHCR and signed with cosign. | Every CI run on GitHub ([Actions](https://github.com/RossouwMaritz/fraud-rule-engine/actions/workflows/ci.yml)). A branch that added a dependency with a known CRITICAL issue (commons-text 1.9) failed both Trivy jobs. `cosign verify` passes on the published image ([Kubernetes](#kubernetes)). |
-| **Security** | API keys must be at least 32 characters, and several can be live at once so a key can be rotated (`FRAUD_API_KEYS`). Keys are compared in constant time. The API docs are off unless `FRAUD_DOCS_ENABLED=true`. Request bodies over 16 KB get `413` and headers over 8 KB get `400`. Each key is rate limited and gets `429` with `Retry-After` past its limit. The app connects as `fraud_app`, which can only read and add rows: it can't change a stored decision or the schema. Base images are pinned by digest, the image has no curl and runs as a non-root user, and the container's filesystem is read-only. Secrets are never in the image or in `k8s/`. | `ApiKeyFilterTest`, `ApiKeySecurityTest`, `ApiDocsTest`, `RequestSizeFilterTest`, `RateLimitTest` and `AppRoleTest`. `AppRoleTest` also fails if a new table gets more than `SELECT` and `INSERT`. |
-| **Resiliency** | Every wait has a limit: 2s for a customer's lock, 2s for a database connection and 5s for a query. Past it the API returns `503` with `Retry-After`, instead of piling up requests. POST is idempotent, so a retry is always safe. Liveness and readiness probes run on their own port. Readiness includes the database and liveness doesn't, so an outage takes pods out of traffic without restarting them. On `SIGTERM`, requests in flight finish. Memory is sized from measurements, and a full heap exits the JVM so it's restarted. Kubernetes runs 2 replicas with a PodDisruptionBudget and rolling updates that keep a pod up. | `FraudApiControllerTest` holds a customer's lock from a second connection and expects `503` with `Retry-After`. `ManagementServerIT` stops Postgres and expects readiness `503` and liveness `200`. The [load test](#load-test) runs with 0 errors inside the 768 MB memory limit. `deploy-smoke` in CI rolls out to kind. |
-| **Configuration** | Every setting comes from an environment variable with a default, including the limits that used to be constants in Java. `.env.example` lists them all. Bad values (a zero window, a page size over 100) stop the app at startup with a clear message. In Kubernetes the settings go in a ConfigMap and the secrets in a Secret. | `FraudRulesPropertiesTest` checks named variables override the defaults, bad values stop startup, and `.env.example` lists the same variables as `application.yml`. `RuleConfigVersionIT` checks the config version stays the same at the defaults. |
+| **CI/CD** | CI has separate jobs: tests with a coverage floor, CodeQL, gitleaks, Trivy scans of the dependencies and the image, and an SBOM. A fixable HIGH or CRITICAL issue fails the build. For CD, the scanned image is deployed to a throwaway kind cluster and the samples run against it. On `main` and `v*` tags, that same image is pushed to GHCR and signed. See [CI](#security-and-ci) and [Kubernetes](#kubernetes). | Every [CI run](https://github.com/RossouwMaritz/fraud-rule-engine/actions/workflows/ci.yml). A test branch that added a dependency with a known CRITICAL issue (commons-text 1.9) failed both Trivy jobs. `cosign verify` passes on the published image. |
+| **Security** | Long API keys that can be rotated, docs off by default, size limits, a per-key rate limit, a database login that can only read and add rows, and a locked-down container. No secrets in the image or in `k8s/`. See [Security and CI](#security-and-ci). | `ApiKeyFilterTest`, `ApiKeySecurityTest`, `ApiDocsTest`, `RequestSizeFilterTest`, `RateLimitTest` and `AppRoleTest`. |
+| **Resiliency** | Every wait has a limit (2s for a customer's lock, 2s for a connection, 5s for a query), and then the API returns `503` with `Retry-After`. Retries are safe. Separate liveness and readiness probes, graceful shutdown, memory sized from measurements, and 2 replicas with a PodDisruptionBudget. See [Running it](#running-it). | `FraudApiControllerTest` holds a customer's lock and expects `503`. `ManagementServerIT` stops Postgres and expects readiness `503` and liveness `200`. The [load test](#load-test) has 0 errors within the 768 MB limit. `deploy-smoke` rolls out to kind. |
+| **Configuration** | Every setting is an environment variable with a default, including the ones that used to be constants in Java. `.env.example` lists them all. Bad values stop the app at startup. In Kubernetes they go in a ConfigMap and a Secret. See [Tuning](#rules). | `FraudRulesPropertiesTest` checks the variables override the defaults, bad values stop startup, and `.env.example` matches `application.yml`. |
 
 **No circuit-breaker library.** A circuit breaker (Resilience4j, say) protects an app from a slow dependency by failing fast for a while. Postgres is this app's only dependency, and the app can't decide anything without it, so there is no fallback to switch to. Short timeouts, `503` with `Retry-After`, and safe retries already give the caller a fast, clear answer. Readiness takes the pod out of traffic while the database is down.
 
