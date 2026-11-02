@@ -1,0 +1,77 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fraud-rule-engine
+spec:
+  replicas: 2
+  strategy:
+    rollingUpdate:
+      maxUnavailable: 0 # a new pod is ready before an old one goes
+  template:
+    spec:
+      # preStop sleep (5s) + FRAUD_SHUTDOWN_TIMEOUT (20s), with room to spare before the SIGKILL.
+      terminationGracePeriodSeconds: 35
+      automountServiceAccountToken: false # the app never calls the Kubernetes API
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: app
+          image: fraud-rule-engine
+          ports:
+            - name: http
+              containerPort: 8080
+            - name: management
+              containerPort: 8081
+          envFrom:
+            - configMapRef:
+                name: fraud-rule-engine
+            # SPRING_DATASOURCE_PASSWORD, SPRING_FLYWAY_USER, SPRING_FLYWAY_PASSWORD and FRAUD_API_KEYS.
+            # shortcut: the app still holds the owner password for Flyway at startup; run migrations as a Job (or an init container with its own Secret) so the app never sees it, before a real deploy.
+            - secretRef:
+                name: fraud-rule-engine
+          # Startup gives Flyway and Spring up to 2 minutes; only then do liveness and readiness start counting.
+          startupProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: management
+            periodSeconds: 5
+            failureThreshold: 24
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: management
+            periodSeconds: 10
+            failureThreshold: 3
+          # Includes the database, so a pod that can't reach Postgres stops getting traffic but isn't restarted.
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: management
+            periodSeconds: 5
+            failureThreshold: 2
+          lifecycle:
+            # The Service keeps sending to a terminating pod for a moment; keep serving until it has caught up.
+            preStop:
+              exec:
+                command: ["sleep", "5"]
+          # The heap is 40% of the memory limit (Dockerfile). No CPU limit: it would throttle the JVM's GC and
+          # JIT threads; the request is enough for scheduling.
+          resources:
+            requests:
+              cpu: 250m
+              memory: 768Mi
+            limits:
+              memory: 768Mi
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp # Tomcat's work files
+      volumes:
+        - name: tmp
+          emptyDir: {}

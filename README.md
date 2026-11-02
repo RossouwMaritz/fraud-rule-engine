@@ -199,6 +199,29 @@ Health and metrics are on their own port, `8081` (`MANAGEMENT_SERVER_PORT`), so 
 - **Shutdown is graceful.** On `SIGTERM` the app stops taking new requests and lets the ones in flight finish, for up to `FRAUD_SHUTDOWN_TIMEOUT` (20s). Compose waits 30s (`stop_grace_period`) before it kills the app.
 - **Limits.** Compose restarts both containers unless you stop them, and caps memory: 768 MB for the app, 512 MB for Postgres. The JVM heap is 40% of the container's memory (`-XX:MaxRAMPercentage=40` in `JAVA_TOOL_OPTIONS`, set in the `Dockerfile`). If the heap fills up anyway, the JVM exits (`-XX:+ExitOnOutOfMemoryError`) and compose restarts it, rather than leaving it running half broken. The rest is for what the JVM and malloc use outside the heap, which under the load test was about 460MB. At 75% the app was killed for using too much memory. `MALLOC_ARENA_MAX=2` cuts about 95MB of malloc overhead. Under the load test the app peaks at about 610MB of its 768MB.
 
+## Kubernetes
+
+`k8s/base` is the app on its own (Kustomize): a Deployment with 2 replicas, a Service for the API on port 80, a PodDisruptionBudget that keeps at least one pod up during a node drain, and a ConfigMap of the non-secret settings.
+
+- **Probes** use the management port, `8081`. A startup probe gives Flyway and Spring up to 2 minutes. Liveness and readiness work as they do under compose (see above).
+- **Shutdown.** A `preStop` sleep of 5s lets the Service stop routing to the pod before Spring's 20s graceful shutdown starts. `terminationGracePeriodSeconds` is 35, so Kubernetes doesn't kill the pod first.
+- **Limits.** Memory request and limit are both 768Mi, the same as compose. There's no CPU limit, because it would throttle the JVM's GC and JIT threads.
+- **Hardening.** Non-root (the image runs as uid `10001`), read-only root filesystem with an `emptyDir` at `/tmp`, no privilege escalation, all capabilities dropped, and no service account token.
+- **Secrets aren't in git.** Each environment creates a Secret called `fraud-rule-engine` with `SPRING_DATASOURCE_PASSWORD`, `SPRING_FLYWAY_USER`, `SPRING_FLYWAY_PASSWORD` and `FRAUD_API_KEYS`. Its overlay sets `SPRING_DATASOURCE_URL` and the image.
+- **The rate limit is per pod**, so with 2 replicas a key gets up to twice `FRAUD_RATE_LIMIT_PER_SECOND`.
+
+`k8s/smoke` is the overlay CI uses. It adds a throwaway Postgres. The `deploy-smoke` job in `.github/workflows/ci.yml` creates a kind cluster, loads the image CI just built and scanned, creates random secrets, runs `kubectl apply -k k8s/smoke`, waits for the rollout and runs `samples/send.sh` through the Service. Copy its steps to try it locally.
+
+On `main` and on `v*` tags, once every other job has passed, the `publish` job pushes that same image to `ghcr.io/rossouwmaritz/fraud-rule-engine`. It's tagged with the full commit SHA, and for a tag also `1.2.3` and `1.2`. Then it's signed with cosign (keyless, through GitHub's OIDC identity). Check a signature with:
+
+```bash
+cosign verify ghcr.io/rossouwmaritz/fraud-rule-engine:<sha> \
+  --certificate-identity-regexp 'https://github.com/RossouwMaritz/fraud-rule-engine/' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
+A real cloud deploy is out of scope. The deploy path is proven on kind, without cloud credentials.
+
 ## Testing
 
 Tests need JDK 25 (check with `java -version`), or set `JAVA_HOME` to point at it.

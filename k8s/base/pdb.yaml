@@ -1,0 +1,11 @@
+# A node drain takes at most one of the two pods at a time.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: fraud-rule-engine
+spec:
+  minAvailable: 1
+  # Spelled out: kustomize's labels don't create a PDB selector, and without one the PDB matches no pods.
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: fraud-rule-engine

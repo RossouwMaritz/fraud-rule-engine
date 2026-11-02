@@ -13,8 +13,9 @@ RUN ./mvnw -B package -DskipTests \
 
 FROM eclipse-temurin:25-jre@sha256:ecdc0adb37bde1a281c4d245a3cd535004b1fc8322d560f5b09463b248c81df0
 # No curl or other extra tools: the orchestrator runs the health checks (compose, or Kubernetes probes).
-RUN useradd --system --no-create-home app
-USER app
+# A fixed numeric UID, so Kubernetes' runAsNonRoot can check it without looking up a user name.
+RUN useradd --system --uid 10001 --no-create-home app
+USER 10001
 WORKDIR /app
 COPY --from=build /build/extracted/dependencies/ ./
 COPY --from=build /build/extracted/spring-boot-loader/ ./

@@ -1,0 +1,10 @@
+# Only the API. Probes reach 8081 on the pod directly, so health and metrics are never behind the Service.
+apiVersion: v1
+kind: Service
+metadata:
+  name: fraud-rule-engine
+spec:
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

@@ -1,0 +1,15 @@
+# Only for CI's deploy-smoke job: the app plus a throwaway Postgres in a kind cluster. Before applying it, create the
+# postgres and fraud-rule-engine Secrets and the postgres-init ConfigMap (see the deploy-smoke job in ci.yml).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../base
+  - postgres.yaml
+images:
+  - name: fraud-rule-engine
+    newTag: ci # loaded into kind by CI, never pulled
+configMapGenerator:
+  - name: fraud-rule-engine
+    behavior: merge
+    literals:
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/fraud

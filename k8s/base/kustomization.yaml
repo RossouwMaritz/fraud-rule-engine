@@ -1,0 +1,21 @@
+# The app on its own. Each environment adds an overlay that sets the database URL and the image, and creates
+# the fraud-rule-engine Secret outside git (see README, "Kubernetes").
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+labels:
+  - pairs:
+      app.kubernetes.io/name: fraud-rule-engine
+    includeSelectors: true
+resources:
+  - deployment.yaml
+  - service.yaml
+  - pdb.yaml
+# Non-secret settings. Any FRAUD_* variable from .env.example can go here. The name gets a hash of the contents,
+# so a config change rolls the pods.
+configMapGenerator:
+  - name: fraud-rule-engine
+    literals:
+      - SPRING_DATASOURCE_USERNAME=fraud_app
+      - MANAGEMENT_SERVER_PORT=8081
+      # Below terminationGracePeriodSeconds minus the preStop sleep, in deployment.yaml.
+      - FRAUD_SHUTDOWN_TIMEOUT=20s

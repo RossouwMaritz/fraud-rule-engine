@@ -1,0 +1,51 @@
+# shortcut: one Postgres pod with no volume, so its data goes with the pod; use a managed database (or an operator) for any real environment.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: postgres
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:17
+          env:
+            - name: POSTGRES_DB
+              value: fraud
+            - name: POSTGRES_USER
+              value: fraud
+          # POSTGRES_PASSWORD and POSTGRES_APP_PASSWORD
+          envFrom:
+            - secretRef:
+                name: postgres
+          ports:
+            - containerPort: 5432
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "fraud", "-d", "fraud"]
+            periodSeconds: 2
+          volumeMounts:
+            # postgres/init-app-role.sh, which creates the app's login on first start, as in compose.
+            - name: init
+              mountPath: /docker-entrypoint-initdb.d
+      volumes:
+        - name: init
+          configMap:
+            name: postgres-init
+            defaultMode: 0555 # executable, so the entrypoint runs it instead of sourcing it into its own shell
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+spec:
+  selector:
+    app.kubernetes.io/name: postgres
+  ports:
+    - port: 5432
