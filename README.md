@@ -6,6 +6,8 @@
 
 A Spring Boot service that takes card transaction events, runs each one through a set of configurable fraud rules, and stores the decision with a readable reason for every rule that fired. It **flags** transactions for review and never blocks them.
 
+How it's built to run in production (CI/CD, security, resiliency and configuration) is in [Production readiness](#production-readiness).
+
 ## Quick start
 
 You need Docker. `send.sh` also needs `curl` and `jq`.
@@ -216,7 +218,7 @@ On `main` and on `v*` tags, once every other job has passed, the `publish` job p
 
 ```bash
 cosign verify ghcr.io/rossouwmaritz/fraud-rule-engine:sha-<full commit SHA> \
-  --certificate-identity-regexp 'https://github.com/RossouwMaritz/fraud-rule-engine/' \
+  --certificate-identity-regexp '^https://github\.com/RossouwMaritz/fraud-rule-engine/\.github/workflows/ci\.yml@refs/(heads/main|tags/v.+)$' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
 
@@ -265,18 +267,38 @@ docker run --rm --network fraud-rule-engine_default -v "$PWD/loadtest:/scripts" 
 docker compose down -v   # afterwards: each run stores ~100k transactions and floods GET /flags
 ```
 
-It runs two scenarios, one after the other, each with 50 virtual users posting as fast as they can for 30 seconds. "Many customers" uses a new customer for every request. "One customer" sends every request for the same customer. The table gives the range over 4 runs. Each run came after one warm-up run on a fresh stack, with the tables emptied between runs. The one-customer numbers swing by 2× from run to run, so take them as a range, not a figure:
+It runs two scenarios, one after the other, each with 50 virtual users posting as fast as they can for 30 seconds. "Many customers" uses a new customer for every request. "One customer" sends every request for the same customer. The table gives the range over 4 runs. Each run came after one warm-up run on a fresh stack, with the tables emptied between runs. Three runs landed close together. The fourth had half the throughput on the same machine, so take the numbers as a range, not a figure:
 
 | Scenario | Requests per second | p50 | p99 | Errors |
 | --- | --- | --- | --- | --- |
-| Many customers | 4,800 to 5,200 | 9 to 10 ms | 21 to 25 ms | 0 |
-| One customer | 160 to 350 | 140 to 300 ms | 350 to 850 ms | 0 |
+| Many customers | 2,400 to 4,900 | 9 to 13 ms | 27 to 132 ms | 0 |
+| One customer | 180 to 250 | 200 to 270 ms | 455 to 575 ms | 0 |
 
-Machine: an Apple M3 Max laptop, with the app, Postgres and k6 all in one Rancher Desktop VM (14 CPUs, 8 GB). The laptop was busy with other work too (load average 7 to 14). Nothing was tuned. A real deployment, with Postgres on its own host, will give different numbers. k6 prints each scenario's rate over the whole 65-second run, so the table divides its request count by 30 seconds instead.
+Machine: an Apple M3 Max laptop, with the app, Postgres and k6 all in one Rancher Desktop VM (14 CPUs, 8 GB). The laptop was busy with other work too (load average 7 to 10). Nothing was tuned. Last run on 2 November 2026, with the production settings on: lock and query timeouts, the rate limit (raised for the test), the 768 MB memory limit and the 40% heap. A real deployment, with Postgres on its own host, will give different numbers. k6 prints each scenario's rate over the whole 65-second run, so the table divides its request count by 30 seconds instead.
 
-**One customer's events run one at a time.** This is on purpose: the advisory lock makes the `VELOCITY` count exact. 50 requests for one customer queue on that one lock, so each waits for the ones ahead of it. That's where the 140 to 300 ms comes from. Each request also gets slower as the card's history grows, because the history rules load every event in the window around it, and this test puts thousands of events on one card in 10 minutes. A real card doesn't come close to 160 events a second.
+**One customer's events run one at a time.** This is on purpose: the advisory lock makes the `VELOCITY` count exact. 50 requests for one customer queue on that one lock, so each waits for the ones ahead of it. That's where the 200 to 270 ms comes from. Each request also gets slower as the card's history grows, because the history rules load every event in the window around it, and this test puts thousands of events on one card in 10 minutes. A real card doesn't come close to 180 events a second.
 
 **A wait has a limit.** A request that waits longer than `FRAUD_LOCK_TIMEOUT` (2s) for its customer's lock gets `503` instead of a growing wait. At the default, the one-customer run gave no `503`s: its slowest request was under 1 second, well inside 2s. With `FRAUD_LOCK_TIMEOUT=100ms`, 257 of 4,085 one-customer requests got `503`, and every other request still got `201`. That run was on a heavily loaded laptop (load average 15), so take its latencies as rough. They are left out of the table. The script accepts `503` only in the one-customer scenario, and prints how many there were.
+
+## Production readiness
+
+The review before the panel raised four points. This is what changed for each, and how you can check it.
+
+| Feedback | What changed | How it's checked |
+| --- | --- | --- |
+| **CI/CD** | CI runs as separate jobs: tests with a coverage floor (93% lines, 90% branches), then CodeQL, gitleaks, a Trivy scan of the dependencies and a Trivy scan of the image, with an SBOM. A HIGH or CRITICAL issue that has a fix fails the build. Actions are pinned by commit SHA, the token is read-only by default, and Dependabot updates Maven, the base images and the actions weekly. For CD, the image that was scanned is deployed with the `k8s/` manifests to a throwaway kind cluster, and the sample scenarios run against it. On `main` and `v*` tags, once everything has passed, that same image is pushed to GHCR and signed with cosign. | Every CI run on GitHub ([Actions](https://github.com/RossouwMaritz/fraud-rule-engine/actions/workflows/ci.yml)). A branch that added a dependency with a known CRITICAL issue (commons-text 1.9) failed both Trivy jobs. `cosign verify` passes on the published image ([Kubernetes](#kubernetes)). |
+| **Security** | API keys must be at least 32 characters, and several can be live at once so a key can be rotated (`FRAUD_API_KEYS`). Keys are compared in constant time. The API docs are off unless `FRAUD_DOCS_ENABLED=true`. Request bodies over 16 KB get `413` and headers over 8 KB get `400`. Each key is rate limited and gets `429` with `Retry-After` past its limit. The app connects as `fraud_app`, which can only read and add rows: it can't change a stored decision or the schema. Base images are pinned by digest, the image has no curl and runs as a non-root user, and the container's filesystem is read-only. Secrets are never in the image or in `k8s/`. | `ApiKeyFilterTest`, `ApiKeySecurityTest`, `ApiDocsTest`, `RequestSizeFilterTest`, `RateLimitTest` and `AppRoleTest`. `AppRoleTest` also fails if a new table gets more than `SELECT` and `INSERT`. |
+| **Resiliency** | Every wait has a limit: 2s for a customer's lock, 2s for a database connection and 5s for a query. Past it the API returns `503` with `Retry-After`, instead of piling up requests. POST is idempotent, so a retry is always safe. Liveness and readiness probes run on their own port. Readiness includes the database and liveness doesn't, so an outage takes pods out of traffic without restarting them. On `SIGTERM`, requests in flight finish. Memory is sized from measurements, and a full heap exits the JVM so it's restarted. Kubernetes runs 2 replicas with a PodDisruptionBudget and rolling updates that keep a pod up. | `FraudApiControllerTest` holds a customer's lock from a second connection and expects `503` with `Retry-After`. `ManagementServerIT` stops Postgres and expects readiness `503` and liveness `200`. The [load test](#load-test) runs with 0 errors inside the 768 MB memory limit. `deploy-smoke` in CI rolls out to kind. |
+| **Configuration** | Every setting comes from an environment variable with a default, including the limits that used to be constants in Java. `.env.example` lists them all. Bad values (a zero window, a page size over 100) stop the app at startup with a clear message. In Kubernetes the settings go in a ConfigMap and the secrets in a Secret. | `FraudRulesPropertiesTest` checks named variables override the defaults, bad values stop startup, and `.env.example` lists the same variables as `application.yml`. `RuleConfigVersionIT` checks the config version stays the same at the defaults. |
+
+**No circuit-breaker library.** A circuit breaker (Resilience4j, say) protects an app from a slow dependency by failing fast for a while. Postgres is this app's only dependency, and the app can't decide anything without it, so there is no fallback to switch to. Short timeouts, `503` with `Retry-After`, and safe retries already give the caller a fast, clear answer. Readiness takes the pod out of traffic while the database is down.
+
+**Known limits**, each marked with a `shortcut:` comment in the code:
+
+- **Migrations run inside the app**, so the app is given the database owner's password at startup. The next step is a separate migration Job.
+- **The rate limit is per pod.** It needs a gateway or a shared store (Redis) when there are many replicas.
+- **A body sent over HTTP/2 without `Content-Length` isn't size-checked.** HTTP/2 is off.
+- **The Postgres in `k8s/smoke` keeps no data.** It's only for the CI smoke test.
 
 ## Design decisions
 
@@ -302,13 +324,17 @@ There is no retention policy yet, and nothing deletes old rows. That's a decisio
 - **FX conversion to one base currency**, so `AMOUNT_ANOMALY` can use a customer's spend across currencies.
 - **Hot reload** of thresholds without a restart.
 - **ML scoring** as one more rule, next to the readable ones.
-- **Real auth** (OAuth2 client credentials or mTLS) instead of one static API key.
+- **Real auth** (OAuth2 client credentials or mTLS) instead of static API keys.
+- **A real cloud deploy**, with a managed Postgres. Today the deploy is proven on kind in CI.
+- **Migrations as their own Kubernetes Job**, so the app never holds the database owner's password.
+- **A shared rate limit** across replicas, at a gateway or in Redis.
+- **A secrets manager** (Vault, or the cloud's own) to supply the Secret, instead of creating it by hand.
 
 ## Versions
 
 | | Version |
 | --- | --- |
 | Java | 25 |
-| Spring Boot | 4.1.1 |
+| Spring Boot | 4.1.2 |
 | PostgreSQL | 17 (`postgres:17` image, 17.11 when last run) |
-| springdoc-openapi | 3.1.1 |
+| springdoc-openapi | 3.2.0 |
