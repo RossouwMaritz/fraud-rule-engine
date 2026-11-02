@@ -212,7 +212,7 @@ Health and metrics are on their own port, `8081` (`MANAGEMENT_SERVER_PORT`), so 
 
 `k8s/smoke` is the overlay CI uses. It adds a throwaway Postgres. The `deploy-smoke` job in `.github/workflows/ci.yml` creates a kind cluster, loads the image CI just built and scanned, creates random secrets, runs `kubectl apply -k k8s/smoke`, waits for the rollout and runs `samples/send.sh` through the Service. Copy its steps to try it locally.
 
-On `main` and on `v*` tags, once every other job has passed, the `publish` job pushes that same image to `ghcr.io/rossouwmaritz/fraud-rule-engine`. It's tagged with the full commit SHA, and for a tag also `1.2.3` and `1.2`. Then it's signed with cosign (keyless, through GitHub's OIDC identity). Check a signature with:
+On `main` and on `v*` tags, once every other job has passed, the `publish` job pushes that same image to `ghcr.io/rossouwmaritz/fraud-rule-engine`. It's tagged with the full commit SHA, and for a tag also `1.2.3` and `1.2`. Then it's signed with cosign (keyless, through GitHub's OIDC identity). Check a signature with cosign 3 or later (cosign 2 can't read the new signature format and reports "no signatures found"):
 
 ```bash
 cosign verify ghcr.io/rossouwmaritz/fraud-rule-engine:<sha> \
