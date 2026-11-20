@@ -1,6 +1,6 @@
 # Pinned by digest (the multi-platform index of 25.0.5_8, 2026-10-29), so a rebuild gets the same base. Update both
 # digests together, on purpose, for a new JDK or security fixes.
-FROM eclipse-temurin:25-jdk@sha256:83f4a7fc27df94dcc7b8de04d14cbbba8da14406f921e966969c3b09000aa507 AS build
+FROM eclipse-temurin:25-jdk@sha256:884a2f8692cc1e2c7e21f95914adf0ae0eafee9a7eb663a12169cc44468256ec AS build
 WORKDIR /build
 # Dependencies first, so a code change reuses this layer.
 COPY mvnw pom.xml ./
@@ -11,7 +11,7 @@ RUN ./mvnw -B package -DskipTests \
     && mv target/*.jar app.jar \
     && java -Djarmode=tools -jar app.jar extract --layers --destination extracted
 
-FROM eclipse-temurin:25-jre@sha256:ecdc0adb37bde1a281c4d245a3cd535004b1fc8322d560f5b09463b248c81df0
+FROM eclipse-temurin:25-jre@sha256:945247f9d092703e0c6be92243ef3c51640229e23ab34d353c8dcdc73e6cd4e6
 # No curl or other extra tools: the orchestrator runs the health checks (compose, or Kubernetes probes).
 # A fixed numeric UID, so Kubernetes' runAsNonRoot can check it without looking up a user name.
 RUN useradd --system --uid 10001 --no-create-home app
